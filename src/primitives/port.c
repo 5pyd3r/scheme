@@ -1,4 +1,5 @@
 #include "prim.h"
+#include "reader.h"
 #include <stdio.h>
 
 word prim_display(vm_state_t* vm, int nargs) {
@@ -45,4 +46,18 @@ word prim_newline(vm_state_t* vm, int nargs) {
     putchar('\n');
     fflush(stdout);
     return word_nil();
+}
+
+word prim_read(vm_state_t* vm, int nargs) {
+    if (nargs != 0) { vm->error_code = 1; return word_eof(); }
+    char buf[4096];
+    if (!fgets(buf, sizeof(buf), stdin))
+        return word_eof();
+    int pos = 0;
+    word result = read_sexp(vm, buf, &pos);
+    if (vm->error_code) {
+        vm->error_code = 0;
+        return word_eof();
+    }
+    return result;
 }
