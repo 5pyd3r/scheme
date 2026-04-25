@@ -22,7 +22,7 @@ scheme_core = static_library('scheme_core',
   include_directories: scheme_inc,
 )
 
-executable('scheme',
+scheme_exe = executable('scheme',
   'main.c',
   include_directories: scheme_inc,
   link_with: scheme_core,
