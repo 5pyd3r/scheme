@@ -108,13 +108,13 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
 
         case OP_LREF: {
             uint8_t idx = read_u8(&vm->ip);
-            *++vm->sp = vm->fp[-(int)idx];
+            *++vm->sp = vm->fp[(int)idx];
             break;
         }
 
         case OP_LSET: {
             uint8_t idx = read_u8(&vm->ip);
-            vm->fp[-(int)idx] = *vm->sp;
+            vm->fp[(int)idx] = *vm->sp;
             break;
         }
 
@@ -185,9 +185,75 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             break;
         }
 
+        case OP_CLOSE: {
+            uint16_t code_idx = read_u16(&vm->ip);
+            uint8_t nfree = read_u8(&vm->ip);
+            word* clo = vm->gc->alloc_words(5);
+            obj_set_type(clo, OBJ_TYPE_CLOSURE);
+            closure_code(clo) = ptr_to_word(vm->code_objects[code_idx]);
+            closure_env(clo) = (word)(uintptr_t)vm->env;
+            clo[DATA_START_INDEX + 2] = nfree;
+            *++vm->sp = ptr_to_word(clo);
+            break;
+        }
+
+        case OP_CALL: {
+            uint8_t nargs = read_u8(&vm->ip);
+            word closure_val = vm->sp[-nargs];
+            word* clo = ptr_from_word(closure_val);
+
+            word* base = vm->sp - nargs;
+
+            // Save caller sp (pointing to base+3, where return value will go)
+            word old_sp = (word)(uintptr_t)(base + 3);
+
+            // Shift args up by 4 (to make room for frame header)
+            for (int i = nargs; i >= 0; i--)
+                base[i + 4] = base[i];
+
+            // Save frame header (4 words)
+            base[0] = old_sp;
+            base[1] = (word)(uintptr_t)vm->ip;   // saved_ip
+            base[2] = (word)(uintptr_t)vm->env;  // saved_env
+            base[3] = (word)(uintptr_t)vm->fp;   // saved_fp
+
+            // Set new frame
+            vm->fp = base + 3;  // fp[0]=saved_fp, fp[1]=arg1
+            vm->env = (word*)(uintptr_t)closure_env(clo);
+            vm->sp = base + nargs + 4;  // point past last arg
+
+            vm->current_code = ptr_from_word(closure_code(clo));
+            vm->ip = code_bytes(vm->current_code);
+            break;
+        }
+
         case OP_RETURN: {
-            word val = *vm->sp;
-            return val;
+            word result = *vm->sp;
+            word* base = vm->fp - 3;  // frame header start
+            word* saved_sp = (word*)(uintptr_t)base[0];
+            vm->ip = (uint8_t*)(uintptr_t)base[1];
+            vm->env = (word*)(uintptr_t)base[2];
+            vm->fp = (word*)(uintptr_t)base[3];
+            vm->sp = saved_sp;
+            *++vm->sp = result;  // place return value
+            break;
+        }
+
+        case OP_TAIL_CALL: {
+            uint8_t nargs = read_u8(&vm->ip);
+            word closure_val = vm->sp[-nargs];
+            word* clo = ptr_from_word(closure_val);
+
+            // Copy args from stack into current frame's fp[1..nargs]
+            for (int i = 0; i < nargs; i++)
+                vm->fp[1 + i] = vm->sp[-(nargs - 1) + i];
+
+            // Reset sp ("delete" old args), jump to new closure code
+            vm->sp = vm->fp + nargs;
+            vm->env = (word*)(uintptr_t)closure_env(clo);
+            vm->current_code = ptr_from_word(closure_code(clo));
+            vm->ip = code_bytes(vm->current_code);
+            break;
         }
 
         case OP_HALT:
