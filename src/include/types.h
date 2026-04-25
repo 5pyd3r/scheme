@@ -22,7 +22,7 @@ typedef uint64_t word;
 #define IMM_MASK  ((word)(0x3 << 2))
 
 // ---- Fixnum ----
-#define word_from_fixnum(n)   ((word)(((int64_t)(n) << 2) | TAG_FIXNUM))
+#define word_from_fixnum(n)   ((word)(((uint64_t)(int64_t)(n) << 2) | TAG_FIXNUM))
 #define word_to_fixnum(w)     ((int64_t)(w) >> 2)
 
 // ---- Char ----
@@ -45,7 +45,9 @@ typedef uint64_t word;
 #define is_false(w)   ((w) == word_false())
 #define is_nil(w)     ((w) == word_nil())
 #define is_eof(w)     ((w) == word_eof())
-#define is_bool(w)    (is_imm(w) && ((w) & IMM_MASK) != IMM_NIL && ((w) & IMM_MASK) != IMM_EOF)
+static inline bool is_bool(word w) {
+    return (w & TAG_MASK) == TAG_IMM && (w & IMM_MASK) != IMM_NIL && (w & IMM_MASK) != IMM_EOF;
+}
 
 // ---- Heap object layout ----
 #define GC_HEADER_SIZE  1
@@ -62,7 +64,7 @@ typedef uint64_t word;
 #define gc_set_mark(hdr)  ((hdr) | GC_MARK_BIT)
 #define gc_clr_mark(hdr)  ((hdr) & ~GC_MARK_BIT)
 #define gc_size(hdr)      ((hdr) >> GC_SIZE_SHIFT)
-#define gc_set_size(hdr, sz) (((hdr) & GC_MARK_BIT) | ((word)(sz) << GC_SIZE_SHIFT))
+#define gc_set_size(hdr, sz) (((hdr) & (GC_MARK_BIT | GC_COLOR_BITS)) | ((word)(sz) << GC_SIZE_SHIFT))
 
 // Convert tagged pointer word to heap object base address
 static inline word* ptr_from_word(word w) {
