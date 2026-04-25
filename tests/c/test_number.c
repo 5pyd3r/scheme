@@ -11,6 +11,8 @@ extern word prim_mul(vm_state_t* vm, int nargs);
 extern word prim_lt(vm_state_t* vm, int nargs);
 extern word prim_gt(vm_state_t* vm, int nargs);
 extern word prim_eq_num(vm_state_t* vm, int nargs);
+extern word word_from_double(vm_state_t* vm, double d);
+extern double word_to_double(word w);
 
 #define INT62_MAX 0x1FFFFFFFFFFFFFFFLL
 
@@ -146,6 +148,17 @@ int main(void) {
     vm->sp[1] = word_from_fixnum(0);
     r = prim_mul(vm, 2);
     CHECK(is_fixnum(r) && word_to_fixnum(r) == 0, "fixnum 1M*0=0");
+
+    // === flonum creation and round-trip ===
+    word fl = word_from_double(vm, 3.14);
+    CHECK(is_ptr(fl) && !is_fixnum(fl), "flonum created");
+    CHECK(word_to_double(fl) == 3.14, "flonum roundtrip");
+
+    fl = word_from_double(vm, -2.5);
+    CHECK(word_to_double(fl) == -2.5, "flonum negative roundtrip");
+
+    fl = word_from_double(vm, 0.0);
+    CHECK(word_to_double(fl) == 0.0, "flonum zero roundtrip");
 
     if (n_failures == 0)
         printf("ALL number tests PASSED\n");

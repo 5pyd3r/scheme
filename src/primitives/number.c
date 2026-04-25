@@ -532,6 +532,71 @@ static char* bignum_to_string(vm_state_t* vm, word b, int radix) {
 }
 
 // ============================================================
+// Flonum representation and arithmetic
+// ============================================================
+
+static inline bool is_flonum(word w) {
+    return is_ptr(w) && obj_type(ptr_from_word(w)) == OBJ_TYPE_FLONUM;
+}
+
+word word_from_double(vm_state_t* vm, double d) {
+    word* hdr = vm->gc->alloc_words(2);
+    obj_set_type(hdr, OBJ_TYPE_FLONUM);
+    uint64_t bits;
+    memcpy(&bits, &d, sizeof(bits));
+    hdr[DATA_START_INDEX] = bits;
+    return ptr_to_word(hdr);
+}
+
+double word_to_double(word w) {
+    word* hdr = ptr_from_word(w);
+    uint64_t bits = hdr[DATA_START_INDEX];
+    double d;
+    memcpy(&d, &bits, sizeof(d));
+    return d;
+}
+
+static word flonum_add(vm_state_t* vm, word a, word b) {
+    return word_from_double(vm, word_to_double(a) + word_to_double(b));
+}
+
+static word flonum_sub(vm_state_t* vm, word a, word b) {
+    return word_from_double(vm, word_to_double(a) - word_to_double(b));
+}
+
+static word flonum_mul(vm_state_t* vm, word a, word b) {
+    return word_from_double(vm, word_to_double(a) * word_to_double(b));
+}
+
+static word flonum_div(vm_state_t* vm, word a, word b) {
+    return word_from_double(vm, word_to_double(a) / word_to_double(b));
+}
+
+static int flonum_cmp(vm_state_t* vm, word a, word b) {
+    (void)vm;
+    double da = word_to_double(a), db = word_to_double(b);
+    if (da < db) return -1;
+    if (da > db) return 1;
+    return 0;
+}
+
+// Convert any numeric word to double (for type promotion)
+static double word_as_double(word w) {
+    if (is_fixnum(w)) return (double)word_to_fixnum(w);
+    if (is_bignum(w)) {
+        word* hdr = ptr_from_word(w);
+        size_t nc = bignum_count(hdr);
+        uint32_t* limbs = bignum_limbs(hdr);
+        double d = 0.0;
+        for (size_t i = nc; i > 0; i--)
+            d = d * (double)((uint64_t)1 << 32) + limbs[i - 1];
+        return bignum_sign(hdr) ? -d : d;
+    }
+    if (is_flonum(w)) return word_to_double(w);
+    return 0.0;
+}
+
+// ============================================================
 // Fixnum-only arithmetic primitives (temporary — will be replaced
 // by type-dispatch in Task 4)
 // ============================================================
