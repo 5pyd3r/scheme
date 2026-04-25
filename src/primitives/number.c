@@ -72,8 +72,13 @@ static int64_t bignum_to_int64(word b, int* ok) {
     if (nc > 2) { *ok = 0; return 0; }
     uint64_t val = limbs[0];
     if (nc > 1) val |= ((uint64_t)limbs[1]) << 32;
-    // Check it fits in 62-bit signed fixnum range
-    if (val > (uint64_t)INT62_MAX) { *ok = 0; return 0; }
+    // INT64_MIN special case: absolute value 2^63 = 0x8000000000000000
+    if (bignum_sign(hdr) && nc == 2 && limbs[1] == 0x80000000U && limbs[0] == 0) {
+        *ok = 1;
+        return INT64_MIN;
+    }
+    // General range check: positive must be <= INT64_MAX, negative abs must be <= INT64_MAX
+    if (val > (uint64_t)INT64_MAX) { *ok = 0; return 0; }
     *ok = 1;
     int64_t result = (int64_t)val;
     return bignum_sign(hdr) ? -result : result;
@@ -83,6 +88,7 @@ static int64_t bignum_to_int64(word b, int* ok) {
 static word bignum_to_fixnum_or_box(word b) {
     int ok;
     int64_t val = bignum_to_int64(b, &ok);
+    // Only unbox if value fits in 62-bit fixnum range
     if (ok && val >= INT62_MIN && val <= INT62_MAX) return word_from_fixnum(val);
     return b;
 }
@@ -278,12 +284,9 @@ word prim_mul(vm_state_t* vm, int nargs) {
         word w = vm->sp[i];
         if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
         if (i == 0) { product = word_to_fixnum(w); continue; }
-        if (fixnum_mul_overflows(product, word_to_fixnum(w))) {
-            // For now, just fall back to raw overflow (bignum_mul in Task 2)
-            product *= word_to_fixnum(w);
-        } else {
-            product *= word_to_fixnum(w);
-        }
+        // Use unsigned multiplication to avoid signed overflow UB.
+        // bignum_mul promotion will be added in Task 2.
+        product = (int64_t)((uint64_t)product * (uint64_t)word_to_fixnum(w));
     }
     return word_from_fixnum(product);
 }
