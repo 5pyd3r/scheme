@@ -15,6 +15,9 @@ static obj_entry_t* free_entries = NULL;
 static size_t total_words_allocated = 0;
 static bool collecting = false;
 
+static void gc_sweep(void);
+static void gc_collect(void);
+
 static obj_entry_t* entry_alloc(void) {
     if (free_entries) {
         obj_entry_t* e = free_entries;
@@ -33,7 +36,12 @@ static void entry_free(obj_entry_t* e) {
 static word* gc_alloc_words(size_t nwords) {
     if (nwords < 3) nwords = 3;
     word* block = (word*)pal->mmap_alloc(nwords * sizeof(word));
-    if (!block) return NULL;
+    if (!block) {
+        // Retry after collection
+        gc_collect();
+        block = (word*)pal->mmap_alloc(nwords * sizeof(word));
+        if (!block) return NULL;
+    }
 
     memset(block, 0, nwords * sizeof(word));
     block[0] = (nwords << GC_SIZE_SHIFT);
@@ -72,6 +80,17 @@ static void mark_word(word w) {
     case OBJ_TYPE_SYMBOL:
         mark_word(symbol_string(hdr));
         break;
+    case OBJ_TYPE_CODE: {
+        // Code object: [hdr][type][bytecode_len][bytecode...][consts...]
+        size_t nwords = gc_size(hdr[0]);
+        size_t bc_len = (size_t)hdr[DATA_START_INDEX]; // stored at data[0]
+        size_t bc_words = (bc_len + sizeof(word) - 1) / sizeof(word);
+        size_t nconsts = nwords - 3 - bc_words;
+        word* consts = hdr + DATA_START_INDEX + 1 + bc_words;
+        for (size_t i = 0; i < nconsts; i++)
+            mark_word(consts[i]);
+        break;
+    }
     }
 }
 

@@ -6,7 +6,7 @@
 
 typedef struct {
     word* (*alloc_words)(size_t nwords);
-    void  (*collect)(void);
+    void  (*collect)(void); // Caller MUST mark roots first via mark_root/mark_stack
     void  (*mark_root)(word w);
     void  (*mark_stack)(word* stack, size_t count);
     size_t (*heap_used)(void);
