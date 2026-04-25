@@ -12,4 +12,7 @@ word vm_dispatch_prim(vm_state_t* vm, int prim_index, int nargs);
 
 int prim_lookup(const char* name);
 
+word prim_display(vm_state_t* vm, int nargs);
+word prim_newline(vm_state_t* vm, int nargs);
+
 #endif

@@ -42,7 +42,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
         size_t nwords = 3 + len;
         word* str = vm->gc->alloc_words(nwords);
         obj_set_type(str, OBJ_TYPE_STRING);
-        string_set(str, 0, (word)len);
+        str[DATA_START_INDEX] = (word)len;
         for (int i = 0; i < len; i++)
             string_set(str, i, word_from_char((unsigned char)s[*pos + i]));
         *pos += len + 1;
@@ -74,7 +74,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
         size_t nwords = 3 + len;
         word* sym = vm->gc->alloc_words(nwords);
         obj_set_type(sym, OBJ_TYPE_SYMBOL);
-        string_set(sym, 0, (word)len);
+        sym[DATA_START_INDEX] = (word)len;
         for (int i = 0; i < len; i++)
             string_set(sym, i, word_from_char((unsigned char)s[*pos + i]));
         *pos += len;
@@ -85,8 +85,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
     return word_nil();
 }
 
-static word read_list(vm_state_t* vm, const char* s, int* pos) {
-    (*pos)++;
+static word read_list_tail(vm_state_t* vm, const char* s, int* pos) {
     skip_ws(s, pos);
 
     if (s[*pos] == ')') {
@@ -109,7 +108,7 @@ static word read_list(vm_state_t* vm, const char* s, int* pos) {
         (*pos)++;
         cdr = word_nil();
     } else {
-        cdr = read_list(vm, s, pos);
+        cdr = read_list_tail(vm, s, pos);
     }
 
     word* pair = vm->gc->alloc_words(4);
@@ -117,6 +116,11 @@ static word read_list(vm_state_t* vm, const char* s, int* pos) {
     pair_car(pair) = car;
     pair_cdr(pair) = cdr;
     return ptr_to_word(pair);
+}
+
+static word read_list(vm_state_t* vm, const char* s, int* pos) {
+    (*pos)++;
+    return read_list_tail(vm, s, pos);
 }
 
 static word read_expr(vm_state_t* vm, const char* s, int* pos) {
@@ -136,7 +140,7 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
         obj_set_type(pair1, OBJ_TYPE_PAIR);
         word* qsym = vm->gc->alloc_words(3 + 5);
         obj_set_type(qsym, OBJ_TYPE_SYMBOL);
-        string_set(qsym, 0, (word)5);
+        qsym[DATA_START_INDEX] = (word)5;
         const char* q = "quote";
         for (int i = 0; i < 5; i++)
             string_set(qsym, i, word_from_char((unsigned char)q[i]));
