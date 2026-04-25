@@ -1,5 +1,4 @@
-scheme_sources = files(
-  'main.c',
+scheme_core_sources = files(
   'pal/pal_posix.c',
   'gc/gc.c',
   'vm/vm.c',
@@ -13,7 +12,13 @@ scheme_sources = files(
 
 scheme_inc = include_directories('include')
 
-executable('scheme',
-  scheme_sources,
+scheme_core = static_library('scheme_core',
+  scheme_core_sources,
   include_directories: scheme_inc,
+)
+
+executable('scheme',
+  'main.c',
+  include_directories: scheme_inc,
+  link_with: scheme_core,
 )
