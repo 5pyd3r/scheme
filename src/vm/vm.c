@@ -223,18 +223,16 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
 
         case OP_CALL: {
             uint8_t nargs = read_u8(&vm->ip);
-            word closure_val = vm->sp[-nargs];
-            word* clo = ptr_from_word(closure_val);
+            // Args compiled first, then closure on top: sp[-nargs+1..0] = args, sp[0] = closure
+            word* clo = ptr_from_word(*vm->sp);
+            word* base = vm->sp - nargs;  // base[0..nargs-1] = args
 
-            word* base = vm->sp - nargs;  // base[0]=closure, base[1]=arg1
-
-            // Save caller sp (pointing past frame header, where return value will go)
+            // Save caller sp
             word old_sp = (word)(uintptr_t)(base + 3);
 
-            // Shift args (base[1..nargs]) up by 3 to make room for 4-word frame header
-            // base[4] = arg1 = fp[1], base[5] = arg2 = fp[2], ...
-            for (int i = nargs; i >= 1; i--)
-                base[i + 3] = base[i];
+            // Shift args (base[0..nargs-1]) to base[4..nargs+3]
+            for (int i = nargs - 1; i >= 0; i--)
+                base[i + 4] = base[i];
 
             // Save frame header (4 words) — base[0..3]
             base[0] = old_sp;
@@ -266,14 +264,14 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
 
         case OP_TAIL_CALL: {
             uint8_t nargs = read_u8(&vm->ip);
-            word closure_val = vm->sp[-nargs];
-            word* clo = ptr_from_word(closure_val);
+            // closure at sp[0], args at sp[-nargs..-1]
+            word* clo = ptr_from_word(*vm->sp);
 
             // Copy args from stack into current frame's fp[1..nargs]
             for (int i = 0; i < nargs; i++)
-                vm->fp[1 + i] = vm->sp[-(nargs - 1) + i];
+                vm->fp[1 + i] = vm->sp[i - nargs];
 
-            // Reset sp ("delete" old args), jump to new closure code
+            // Reset sp, jump to new closure code
             vm->sp = vm->fp + nargs;
             vm->env = (word*)(uintptr_t)closure_env(clo);
             vm->current_code = ptr_from_word(closure_code(clo));

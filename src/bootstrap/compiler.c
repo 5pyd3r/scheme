@@ -197,15 +197,15 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
 
         int false_start = buf->len;
         int false_offset = false_start - (jmp_false_pos + 3);
-        buf->bytes[jmp_false_pos + 1] = (uint8_t)((false_offset >> 8) & 0xFF);
-        buf->bytes[jmp_false_pos + 2] = (uint8_t)(false_offset & 0xFF);
+        buf->bytes[jmp_false_pos + 1] = (uint8_t)(false_offset & 0xFF);
+        buf->bytes[jmp_false_pos + 2] = (uint8_t)((false_offset >> 8) & 0xFF);
 
         if (!is_nil(else_expr))
             compile_expr_to_buf(buf, vm, else_expr, scope);
 
         int end_offset = buf->len - (jmp_end_pos + 3);
-        buf->bytes[jmp_end_pos + 1] = (uint8_t)((end_offset >> 8) & 0xFF);
-        buf->bytes[jmp_end_pos + 2] = (uint8_t)(end_offset & 0xFF);
+        buf->bytes[jmp_end_pos + 1] = (uint8_t)(end_offset & 0xFF);
+        buf->bytes[jmp_end_pos + 2] = (uint8_t)((end_offset >> 8) & 0xFF);
         return;
     }
 
@@ -249,8 +249,9 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         emit_byte(buf, (uint8_t)(known_prim_idx & 0xFF));
         emit_byte(buf, (uint8_t)((known_prim_idx >> 8) & 0xFF));
     } else {
-        // User function call -- compile fn (closure) then args
-        compile_expr_to_buf(buf, vm, fn, scope);
+        // User function call — compile args first, then fn (closure on top)
+        // This ensures nested calls work: inner calls return, their results are below
+        // the closure on the stack.
         word acur = args;
         int nargs = 0;
         while (is_ptr(acur) && obj_type(ptr_from_word(acur)) == OBJ_TYPE_PAIR) {
@@ -258,6 +259,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             acur = pair_cdr(ptr_from_word(acur));
             nargs++;
         }
+        compile_expr_to_buf(buf, vm, fn, scope);
         emit_byte(buf, OP_CALL);
         emit_byte(buf, (uint8_t)nargs);
     }
