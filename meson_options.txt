@@ -1,0 +1,1 @@
+option('gc_impl', type: 'string', value: 'marksweep', description: 'GC implementation')
