@@ -596,130 +596,245 @@ static double word_as_double(word w) {
     return 0.0;
 }
 
+// Promote fixnum to bignum, pass through other numeric types unchanged
+static word promote_to_bignum(vm_state_t* vm, word w) {
+    if (is_fixnum(w)) return bignum_from_int64(vm, word_to_fixnum(w));
+    return w;
+}
+
 // ============================================================
-// Fixnum-only arithmetic primitives (temporary — will be replaced
-// by type-dispatch in Task 4)
+// Type-dispatch arithmetic primitives
 // ============================================================
 
 word prim_add(vm_state_t* vm, int nargs) {
-    int64_t sum = 0;
+    bool has_flonum = false, has_bignum = false;
     for (int i = 0; i < nargs; i++) {
         word w = vm->sp[i];
-        if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        if (i == 0) { sum = word_to_fixnum(w); continue; }
-        if (fixnum_add_overflows(sum, word_to_fixnum(w))) {
+        if (is_flonum(w)) has_flonum = true;
+        else if (is_bignum(w)) has_bignum = true;
+        else if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
+    }
+
+    if (has_flonum) {
+        double sum = 0.0;
+        for (int i = 0; i < nargs; i++)
+            sum += word_as_double(vm->sp[i]);
+        return word_from_double(vm, sum);
+    }
+
+    if (has_bignum) {
+        word acc = bignum_from_int64(vm, 0);
+        for (int i = 0; i < nargs; i++) {
+            word w = vm->sp[i];
+            word bn = is_fixnum(w) ? bignum_from_int64(vm, word_to_fixnum(w)) : w;
+            acc = bignum_add(vm, acc, bn);
+        }
+        return bignum_to_fixnum_or_box(acc);
+    }
+
+    int64_t sum = 0;
+    for (int i = 0; i < nargs; i++) {
+        if (i > 0 && fixnum_add_overflows(sum, word_to_fixnum(vm->sp[i]))) {
             word acc = bignum_from_int64(vm, sum);
             for (; i < nargs; i++) {
-                w = vm->sp[i];
-                if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-                acc = bignum_add(vm, acc, bignum_from_int64(vm, word_to_fixnum(w)));
+                acc = bignum_add(vm, acc, bignum_from_int64(vm, word_to_fixnum(vm->sp[i])));
             }
             return bignum_to_fixnum_or_box(acc);
         }
-        sum += word_to_fixnum(w);
+        sum = (i == 0) ? word_to_fixnum(vm->sp[i]) : sum + word_to_fixnum(vm->sp[i]);
     }
     return word_from_fixnum(sum);
 }
 
 word prim_sub(vm_state_t* vm, int nargs) {
     if (nargs == 0) { vm->error_code = 1; return word_nil(); }
-    if (nargs == 1) {
-        word w = vm->sp[0];
-        if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        int64_t v = word_to_fixnum(w);
-        if (v == INT62_MIN) {
-            word zero = bignum_from_int64(vm, 0);
-            word neg = bignum_from_int64(vm, v);
-            return bignum_to_fixnum_or_box(bignum_sub(vm, zero, neg));
-        }
-        return word_from_fixnum(-v);
-    }
-    word w0 = vm->sp[0];
-    if (!is_fixnum(w0)) { vm->error_code = 1; return word_nil(); }
-    int64_t result = word_to_fixnum(w0);
-    for (int i = 1; i < nargs; i++) {
+    bool has_flonum = false, has_bignum = false;
+    for (int i = 0; i < nargs; i++) {
         word w = vm->sp[i];
-        if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        if (fixnum_sub_overflows(result, word_to_fixnum(w))) {
-            word acc = bignum_from_int64(vm, result);
-            for (; i < nargs; i++) {
-                w = vm->sp[i];
-                if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-                acc = bignum_sub(vm, acc, bignum_from_int64(vm, word_to_fixnum(w)));
+        if (is_flonum(w)) has_flonum = true;
+        else if (is_bignum(w)) has_bignum = true;
+        else if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
+    }
+
+    if (has_flonum) {
+        double result = word_as_double(vm->sp[0]);
+        if (nargs == 1) { result = -result; }
+        else { for (int i = 1; i < nargs; i++) result -= word_as_double(vm->sp[i]); }
+        return word_from_double(vm, result);
+    }
+
+    if (has_bignum || nargs == 1) {
+        word acc = promote_to_bignum(vm, vm->sp[0]);
+        if (nargs == 1) {
+            if (is_fixnum(vm->sp[0])) {
+                int64_t v = word_to_fixnum(vm->sp[0]);
+                if (v == INT62_MIN) {
+                    word zero = bignum_from_int64(vm, 0);
+                    return bignum_to_fixnum_or_box(bignum_sub(vm, zero, acc));
+                }
+                return word_from_fixnum(-v);
             }
+            return bignum_to_fixnum_or_box(bignum_negate(vm, acc));
+        }
+        for (int i = 1; i < nargs; i++)
+            acc = bignum_sub(vm, acc, promote_to_bignum(vm, vm->sp[i]));
+        return bignum_to_fixnum_or_box(acc);
+    }
+
+    int64_t result = word_to_fixnum(vm->sp[0]);
+    if (nargs == 1) {
+        if (result == INT62_MIN) {
+            return bignum_to_fixnum_or_box(
+                bignum_sub(vm, bignum_from_int64(vm, 0), bignum_from_int64(vm, result)));
+        }
+        return word_from_fixnum(-result);
+    }
+    for (int i = 1; i < nargs; i++) {
+        if (fixnum_sub_overflows(result, word_to_fixnum(vm->sp[i]))) {
+            word acc = bignum_from_int64(vm, result);
+            for (; i < nargs; i++)
+                acc = bignum_sub(vm, acc, bignum_from_int64(vm, word_to_fixnum(vm->sp[i])));
             return bignum_to_fixnum_or_box(acc);
         }
-        result -= word_to_fixnum(w);
+        result -= word_to_fixnum(vm->sp[i]);
     }
     return word_from_fixnum(result);
 }
 
 word prim_mul(vm_state_t* vm, int nargs) {
-    int64_t product = 1;
+    bool has_flonum = false, has_bignum = false;
     for (int i = 0; i < nargs; i++) {
         word w = vm->sp[i];
-        if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        if (i == 0) { product = word_to_fixnum(w); continue; }
-        if (fixnum_mul_overflows(product, word_to_fixnum(w))) {
+        if (is_flonum(w)) has_flonum = true;
+        else if (is_bignum(w)) has_bignum = true;
+        else if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
+    }
+
+    if (has_flonum) {
+        double prod = word_as_double(vm->sp[0]);
+        for (int i = 1; i < nargs; i++)
+            prod *= word_as_double(vm->sp[i]);
+        return word_from_double(vm, prod);
+    }
+
+    if (has_bignum) {
+        word acc = promote_to_bignum(vm, vm->sp[0]);
+        for (int i = 1; i < nargs; i++)
+            acc = bignum_mul(vm, acc, promote_to_bignum(vm, vm->sp[i]));
+        return bignum_to_fixnum_or_box(acc);
+    }
+
+    int64_t product = 1;
+    for (int i = 0; i < nargs; i++) {
+        if (i == 0) { product = word_to_fixnum(vm->sp[i]); continue; }
+        if (fixnum_mul_overflows(product, word_to_fixnum(vm->sp[i]))) {
             word acc = bignum_from_int64(vm, product);
-            acc = bignum_mul(vm, acc, bignum_from_int64(vm, word_to_fixnum(w)));
-            for (i++; i < nargs; i++) {
-                w = vm->sp[i];
-                if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-                acc = bignum_mul(vm, acc, bignum_from_int64(vm, word_to_fixnum(w)));
-            }
+            acc = bignum_mul(vm, acc, bignum_from_int64(vm, word_to_fixnum(vm->sp[i])));
+            for (i++; i < nargs; i++)
+                acc = bignum_mul(vm, acc, bignum_from_int64(vm, word_to_fixnum(vm->sp[i])));
             return bignum_to_fixnum_or_box(acc);
         }
-        product = (int64_t)((uint64_t)product * (uint64_t)word_to_fixnum(w));
+        product = (int64_t)((uint64_t)product * (uint64_t)word_to_fixnum(vm->sp[i]));
     }
     return word_from_fixnum(product);
 }
 
 word prim_div(vm_state_t* vm, int nargs) {
     if (nargs < 1) { vm->error_code = 1; return word_nil(); }
-    word w = vm->sp[0];
-    if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-    int64_t result = word_to_fixnum(w);
-    for (int i = 1; i < nargs; i++) {
-        w = vm->sp[i];
-        if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        int64_t divisor = word_to_fixnum(w);
-        if (divisor == 0) { vm->error_code = 1; return word_nil(); }
-        result /= divisor;
+    bool has_flonum = false;
+    for (int i = 0; i < nargs; i++) {
+        word w = vm->sp[i];
+        if (is_flonum(w)) has_flonum = true;
+        else if (!is_fixnum(w) && !is_bignum(w)) { vm->error_code = 1; return word_nil(); }
     }
-    return word_from_fixnum(result);
+
+    if (has_flonum) {
+        double result = word_as_double(vm->sp[0]);
+        for (int i = 1; i < nargs; i++) {
+            double d = word_as_double(vm->sp[i]);
+            if (d == 0.0) { vm->error_code = 1; return word_nil(); }
+            result /= d;
+        }
+        return word_from_double(vm, result);
+    }
+
+    // Exact integer division using bignum arithmetic
+    word acc = promote_to_bignum(vm, vm->sp[0]);
+    for (int i = 1; i < nargs; i++) {
+        word divisor = promote_to_bignum(vm, vm->sp[i]);
+        if (bignum_count(ptr_from_word(divisor)) == 0) {
+            vm->error_code = 1; return word_nil();
+        }
+        word rem;
+        word quotient = bignum_divmod(vm, acc, divisor, &rem);
+        if (bignum_count(ptr_from_word(rem)) != 0) {
+            // Not exact — fall back to flonum
+            double d = word_as_double(acc);
+            for (; i < nargs; i++)
+                d /= word_as_double(vm->sp[i]);
+            return word_from_double(vm, d);
+        }
+        acc = quotient;
+    }
+    return bignum_to_fixnum_or_box(acc);
 }
 
 word prim_lt(vm_state_t* vm, int nargs) {
+    bool has_flonum = false;
+    for (int i = 0; i < nargs; i++)
+        if (is_flonum(vm->sp[i])) { has_flonum = true; break; }
+
+    if (has_flonum) {
+        for (int i = 1; i < nargs; i++)
+            if (!(word_as_double(vm->sp[i-1]) < word_as_double(vm->sp[i])))
+                return word_false();
+        return word_true();
+    }
+
     for (int i = 1; i < nargs; i++) {
-        word a = vm->sp[i-1], b = vm->sp[i];
-        if (!is_fixnum(a) || !is_fixnum(b)) { vm->error_code = 1; return word_nil(); }
-        if (word_to_fixnum(a) >= word_to_fixnum(b))
-            return word_false();
+        word a = promote_to_bignum(vm, vm->sp[i-1]);
+        word b = promote_to_bignum(vm, vm->sp[i]);
+        if (bignum_cmp(a, b) >= 0) return word_false();
     }
     return word_true();
 }
 
 word prim_gt(vm_state_t* vm, int nargs) {
+    bool has_flonum = false;
+    for (int i = 0; i < nargs; i++)
+        if (is_flonum(vm->sp[i])) { has_flonum = true; break; }
+
+    if (has_flonum) {
+        for (int i = 1; i < nargs; i++)
+            if (!(word_as_double(vm->sp[i-1]) > word_as_double(vm->sp[i])))
+                return word_false();
+        return word_true();
+    }
+
     for (int i = 1; i < nargs; i++) {
-        word a = vm->sp[i-1], b = vm->sp[i];
-        if (!is_fixnum(a) || !is_fixnum(b)) { vm->error_code = 1; return word_nil(); }
-        if (word_to_fixnum(a) <= word_to_fixnum(b))
-            return word_false();
+        word a = promote_to_bignum(vm, vm->sp[i-1]);
+        word b = promote_to_bignum(vm, vm->sp[i]);
+        if (bignum_cmp(a, b) <= 0) return word_false();
     }
     return word_true();
 }
 
 word prim_eq_num(vm_state_t* vm, int nargs) {
     if (nargs < 2) { vm->error_code = 1; return word_nil(); }
-    word w0 = vm->sp[0];
-    if (!is_fixnum(w0)) { vm->error_code = 1; return word_nil(); }
-    int64_t first = word_to_fixnum(w0);
-    for (int i = 1; i < nargs; i++) {
-        word w = vm->sp[i];
-        if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        if (word_to_fixnum(w) != first)
-            return word_false();
+    bool has_flonum = false;
+    for (int i = 0; i < nargs; i++)
+        if (is_flonum(vm->sp[i])) { has_flonum = true; break; }
+
+    if (has_flonum) {
+        double first = word_as_double(vm->sp[0]);
+        for (int i = 1; i < nargs; i++)
+            if (word_as_double(vm->sp[i]) != first) return word_false();
+        return word_true();
     }
+
+    word first = promote_to_bignum(vm, vm->sp[0]);
+    for (int i = 1; i < nargs; i++)
+        if (bignum_cmp(first, promote_to_bignum(vm, vm->sp[i])) != 0)
+            return word_false();
     return word_true();
 }
