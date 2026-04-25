@@ -172,6 +172,27 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
 
     char c = s[*pos];
     if (c == '(')  return read_list(vm, s, pos);
+    if (c == '#' && s[*pos + 1] == 'u' && s[*pos + 2] == '8' && s[*pos + 3] == '(') {
+        *pos += 4;
+        word lst = read_list_tail(vm, s, pos);
+        // Convert list to bytevector via u8-list->bytevector
+        size_t count = 0;
+        word cur = lst;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            count++;
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+        word* bv = vm->gc->alloc_words(3 + (count + 7) / 8);
+        obj_set_type(bv, OBJ_TYPE_BYTEVECTOR);
+        bv[DATA_START_INDEX] = (word)count;
+        cur = lst;
+        for (size_t i = 0; i < count; i++) {
+            word* p = ptr_from_word(cur);
+            bytevector_data(bv)[i] = (uint8_t)(word_to_fixnum(pair_car(p)) & 0xFF);
+            cur = pair_cdr(p);
+        }
+        return ptr_to_word(bv);
+    }
     if (c == '\'') {
         (*pos)++;
         word expr = read_expr(vm, s, pos);
