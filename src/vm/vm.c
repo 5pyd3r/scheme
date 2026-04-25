@@ -31,8 +31,17 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
 }
 
 int vm_load_code(vm_state_t* vm, word* code_obj) {
-    int idx = vm->code_count++;
-    vm->code_objects = realloc(vm->code_objects, vm->code_count * sizeof(word*));
+    int idx = vm->code_count;
+    // Grow if needed (power-of-2 strategy starting from 64)
+    if (idx >= 64) {
+        size_t new_slots = vm->code_count * 2;
+        word** new_objs = realloc(vm->code_objects, new_slots * sizeof(word*));
+        if (!new_objs) return -1;
+        vm->code_objects = new_objs;
+        memset(vm->code_objects + vm->code_count, 0,
+               (new_slots - vm->code_count) * sizeof(word*));
+    }
+    vm->code_count = idx + 1;
     vm->code_objects[idx] = code_obj;
     return idx;
 }
