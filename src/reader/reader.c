@@ -152,7 +152,7 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
 }
 
 word read_sexp(vm_state_t* vm, const char* input, int* end_pos) {
-    int pos = 0;
+    int pos = end_pos ? *end_pos : 0;
     word result = read_expr(vm, input, &pos);
     if (end_pos) *end_pos = pos;
     return result;
