@@ -168,6 +168,10 @@ int main(int argc, char** argv) {
     if (pal->file_exists("src/scheme/compiler.scm"))
         exec_file("src/scheme/compiler.scm", 0);
 
+    /* Phase 1b: Load standard library (C compiler constraints apply) */
+    if (pal->file_exists("src/scheme/lib.scm"))
+        exec_file("src/scheme/lib.scm", 0);
+
     /* Phase 2: Use Scheme compiler (with C fallback) for user code */
     if (argc > 1)
         return exec_file(argv[1], 1);
