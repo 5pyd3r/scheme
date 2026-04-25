@@ -13,3 +13,10 @@ test_gc = executable('test_gc',
   link_with: scheme_core,
 )
 test('gc', test_gc)
+
+test_number = executable('test_number',
+  'test_number.c',
+  include_directories: test_scheme_inc,
+  link_with: scheme_core,
+)
+test('number', test_number)
