@@ -1,5 +1,4 @@
 #include "compiler.h"
-#include "reader.h"
 #include "prim.h"
 #include "vm/opcodes.h"
 #include <stdio.h>
@@ -17,11 +16,6 @@ typedef struct {
 
 static void emit_byte(code_buf_t* buf, uint8_t b) {
     buf->bytes[buf->len++] = b;
-}
-
-static void emit_word(code_buf_t* buf, word w) {
-    memcpy(buf->bytes + buf->len, &w, sizeof(word));
-    buf->len += sizeof(word);
 }
 
 static int add_const(code_buf_t* buf, word val) {
