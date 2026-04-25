@@ -86,6 +86,16 @@ word prim_char_lt(vm_state_t* vm, int nargs);
 word prim_char_gt(vm_state_t* vm, int nargs);
 word prim_char_le(vm_state_t* vm, int nargs);
 word prim_char_ge(vm_state_t* vm, int nargs);
+word prim_stringp(vm_state_t* vm, int nargs);
+word prim_make_string(vm_state_t* vm, int nargs);
+word prim_string(vm_state_t* vm, int nargs);
+word prim_string_length(vm_state_t* vm, int nargs);
+word prim_string_ref(vm_state_t* vm, int nargs);
+word prim_string_set(vm_state_t* vm, int nargs);
+word prim_string_eq(vm_state_t* vm, int nargs);
+word prim_string_lt(vm_state_t* vm, int nargs);
+word prim_string_to_list(vm_state_t* vm, int nargs);
+word prim_list_to_string(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
@@ -261,6 +271,16 @@ static prim_entry_t prim_table[] = {
     {"char>?",            prim_char_gt},
     {"char<=?",           prim_char_le},
     {"char>=?",           prim_char_ge},
+    {"string?",           prim_stringp},
+    {"make-string",       prim_make_string},
+    {"string",            prim_string},
+    {"string-length",     prim_string_length},
+    {"string-ref",        prim_string_ref},
+    {"string-set!",       prim_string_set},
+    {"string=?",          prim_string_eq},
+    {"string<?",          prim_string_lt},
+    {"string->list",      prim_string_to_list},
+    {"list->string",      prim_list_to_string},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 

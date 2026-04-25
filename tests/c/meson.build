@@ -39,3 +39,11 @@ test_char = executable('test_char',
   link_args: ['-lm'],
 )
 test('char', test_char)
+
+test_string = executable('test_string',
+  'test_string.c',
+  include_directories: test_scheme_inc,
+  link_with: scheme_core,
+  link_args: ['-lm'],
+)
+test('string', test_string)
