@@ -22,4 +22,5 @@ executable('scheme',
   'main.c',
   include_directories: scheme_inc,
   link_with: scheme_core,
+  link_args: ['-lm'],
 )
