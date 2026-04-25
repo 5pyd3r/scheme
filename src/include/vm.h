@@ -42,5 +42,6 @@ int vm_load_code(vm_state_t* vm, word* code_obj);
 word vm_execute(vm_state_t* vm, int entry_point);
 int vm_register_prim(vm_state_t* vm, word prim);
 int vm_find_global_slot(vm_state_t* vm, word sym);
+int vm_find_global_by_name(vm_state_t* vm, const char* name);
 
 #endif

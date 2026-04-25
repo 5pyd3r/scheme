@@ -70,6 +70,26 @@ int vm_find_global_slot(vm_state_t* vm, word sym) {
     return -1;
 }
 
+int vm_find_global_by_name(vm_state_t* vm, const char* name) {
+    int nlen = (int)strlen(name);
+    for (int i = 0; i < vm->next_global_slot; i++) {
+        word name_word = vm->global_names[i];
+        if (!is_ptr(name_word)) continue;
+        word* hdr = ptr_from_word(name_word);
+        if (obj_type(hdr) != OBJ_TYPE_SYMBOL) continue;
+        int slen = (int)string_length(hdr);
+        if (slen != nlen) continue;
+        int match = 1;
+        for (int j = 0; j < slen; j++) {
+            if (word_to_char(string_ref(hdr, j)) != (unsigned char)name[j]) {
+                match = 0; break;
+            }
+        }
+        if (match) return i;
+    }
+    return -1;
+}
+
 static uint8_t  read_u8(uint8_t** ip)     { return *(*ip)++; }
 static int32_t  read_s32(uint8_t** ip)    { int32_t v; memcpy(&v, *ip, 4); *ip += 4; return v; }
 static int16_t  read_s16(uint8_t** ip)    { int16_t v; memcpy(&v, *ip, 2); *ip += 2; return v; }
