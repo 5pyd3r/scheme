@@ -316,13 +316,15 @@ static word bignum_gcd(vm_state_t* vm, word a, word b) {
     while (bignum_is_even(a)) a = bignum_halve(vm, a);
     while (bignum_is_even(b)) b = bignum_halve(vm, b);
 
-    while (!bignum_zerop(a)) {
+    while (!bignum_zerop(a) && !bignum_zerop(b)) {
         if (bignum_cmp(a, b) > 0) {
             a = bignum_halve(vm, bignum_sub(vm, a, b));
-            while (bignum_is_even(a)) a = bignum_halve(vm, a);
-        } else {
+            while (!bignum_zerop(a) && bignum_is_even(a)) a = bignum_halve(vm, a);
+        } else if (bignum_cmp(a, b) < 0) {
             b = bignum_halve(vm, bignum_sub(vm, b, a));
-            while (bignum_is_even(b)) b = bignum_halve(vm, b);
+            while (!bignum_zerop(b) && bignum_is_even(b)) b = bignum_halve(vm, b);
+        } else {
+            break;
         }
     }
 
