@@ -78,6 +78,14 @@ word prim_vector_set(vm_state_t* vm, int nargs);
 word prim_list_to_vector(vm_state_t* vm, int nargs);
 word prim_vector_to_list(vm_state_t* vm, int nargs);
 word prim_equal(vm_state_t* vm, int nargs);
+word prim_charp(vm_state_t* vm, int nargs);
+word prim_char_to_integer(vm_state_t* vm, int nargs);
+word prim_integer_to_char(vm_state_t* vm, int nargs);
+word prim_char_eq(vm_state_t* vm, int nargs);
+word prim_char_lt(vm_state_t* vm, int nargs);
+word prim_char_gt(vm_state_t* vm, int nargs);
+word prim_char_le(vm_state_t* vm, int nargs);
+word prim_char_ge(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
@@ -245,6 +253,14 @@ static prim_entry_t prim_table[] = {
     {"list->vector",     prim_list_to_vector},
     {"vector->list",     prim_vector_to_list},
     {"equal?",           prim_equal},
+    {"char?",             prim_charp},
+    {"char->integer",     prim_char_to_integer},
+    {"integer->char",     prim_integer_to_char},
+    {"char=?",            prim_char_eq},
+    {"char<?",            prim_char_lt},
+    {"char>?",            prim_char_gt},
+    {"char<=?",           prim_char_le},
+    {"char>=?",           prim_char_ge},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 
