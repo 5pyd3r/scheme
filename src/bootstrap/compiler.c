@@ -217,6 +217,142 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         return;
     }
 
+    if (is_symbol(fn, "begin")) {
+        int count = 0;
+        word cur = args;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            count++;
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+        if (count == 0) {
+            emit_byte(buf, OP_PUSH_NIL);
+            return;
+        }
+        // Compile all but last with POP
+        cur = args;
+        word last_val = word_nil();
+        for (int i = 0; i < count - 1; i++) {
+            word expr = pair_car(ptr_from_word(cur));
+            compile_expr_to_buf(buf, vm, expr, scope);
+            emit_byte(buf, OP_POP);
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+        // Compile last expression (value stays on stack)
+        last_val = pair_car(ptr_from_word(cur));
+        compile_expr_to_buf(buf, vm, last_val, scope);
+        return;
+    }
+
+    if (is_symbol(fn, "cond")) {
+        word* is = vm->gc->alloc_words(3 + 2);
+        obj_set_type(is, OBJ_TYPE_SYMBOL);
+        is[DATA_START_INDEX] = (word)2;
+        string_set(is, 0, word_from_char('i'));
+        string_set(is, 1, word_from_char('f'));
+        word if_sym = ptr_to_word(is);
+
+        word clauses[32];
+        int n = 0;
+        word cur = args;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR && n < 32) {
+            clauses[n++] = pair_car(ptr_from_word(cur));
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+        if (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            vm->error_code = 1;
+            return;
+        }
+
+        // Build nested if from last clause backwards
+        word result = word_nil();
+        for (int i = n - 1; i >= 0; i--) {
+            word* chdr = ptr_from_word(clauses[i]);
+            word test = pair_car(chdr);
+            word body = pair_car(ptr_from_word(pair_cdr(chdr)));
+            int is_else = (is_ptr(test) && obj_type(ptr_from_word(test)) == OBJ_TYPE_SYMBOL
+                           && is_symbol(test, "else"));
+
+            if (is_else) {
+                result = body;
+            } else {
+                // Build (if test body result) as S-expression
+                word* rp = vm->gc->alloc_words(4); obj_set_type(rp, OBJ_TYPE_PAIR);
+                pair_car(rp) = result; pair_cdr(rp) = word_nil();
+
+                word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+                pair_car(bp) = body; pair_cdr(bp) = ptr_to_word(rp);
+
+                word* tp = vm->gc->alloc_words(4); obj_set_type(tp, OBJ_TYPE_PAIR);
+                pair_car(tp) = test; pair_cdr(tp) = ptr_to_word(bp);
+
+                word* ip = vm->gc->alloc_words(4); obj_set_type(ip, OBJ_TYPE_PAIR);
+                pair_car(ip) = if_sym; pair_cdr(ip) = ptr_to_word(tp);
+
+                result = ptr_to_word(ip);
+            }
+        }
+
+        compile_expr_to_buf(buf, vm, result, scope);
+        return;
+    }
+
+    if (is_symbol(fn, "let")) {
+        word* ahdr = ptr_from_word(args);
+        word bindings = pair_car(ahdr);
+        word body = pair_car(ptr_from_word(pair_cdr(ahdr)));
+
+        // Create "lambda" symbol
+        word* ls = vm->gc->alloc_words(3 + 6);
+        obj_set_type(ls, OBJ_TYPE_SYMBOL);
+        ls[DATA_START_INDEX] = (word)6;
+        const char* lsrc = "lambda";
+        for (int i = 0; i < 6; i++)
+            string_set(ls, i, word_from_char((unsigned char)lsrc[i]));
+        word lambda_sym = ptr_to_word(ls);
+
+        // Collect params and values from bindings
+        word param_list = word_nil();
+        word val_list = word_nil();
+        word* prev_param = NULL;
+        word* prev_val = NULL;
+        word cur = bindings;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            word* bhdr = ptr_from_word(pair_car(ptr_from_word(cur)));
+            word param = pair_car(bhdr);
+            word val = pair_car(ptr_from_word(pair_cdr(bhdr)));
+
+            word* pp = vm->gc->alloc_words(4); obj_set_type(pp, OBJ_TYPE_PAIR);
+            pair_car(pp) = param; pair_cdr(pp) = word_nil();
+            if (prev_param) pair_cdr(prev_param) = ptr_to_word(pp);
+            else param_list = ptr_to_word(pp);
+            prev_param = pp;
+
+            word* vp = vm->gc->alloc_words(4); obj_set_type(vp, OBJ_TYPE_PAIR);
+            pair_car(vp) = val; pair_cdr(vp) = word_nil();
+            if (prev_val) pair_cdr(prev_val) = ptr_to_word(vp);
+            else val_list = ptr_to_word(vp);
+            prev_val = vp;
+
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+
+        // Build: ((lambda (params) body) val1 val2 ...)
+        word* body_pair = vm->gc->alloc_words(4); obj_set_type(body_pair, OBJ_TYPE_PAIR);
+        pair_car(body_pair) = body; pair_cdr(body_pair) = word_nil();
+
+        word* args_pair = vm->gc->alloc_words(4); obj_set_type(args_pair, OBJ_TYPE_PAIR);
+        pair_car(args_pair) = param_list; pair_cdr(args_pair) = ptr_to_word(body_pair);
+
+        word* lambda_pair = vm->gc->alloc_words(4); obj_set_type(lambda_pair, OBJ_TYPE_PAIR);
+        pair_car(lambda_pair) = lambda_sym; pair_cdr(lambda_pair) = ptr_to_word(args_pair);
+
+        word* call_pair = vm->gc->alloc_words(4); obj_set_type(call_pair, OBJ_TYPE_PAIR);
+        pair_car(call_pair) = ptr_to_word(lambda_pair); pair_cdr(call_pair) = val_list;
+
+        compile_expr_to_buf(buf, vm, ptr_to_word(call_pair), scope);
+        return;
+    }
+
     // Check if fn is a known primitive
     int known_prim_idx = -1;
     if (is_ptr(fn) && obj_type(ptr_from_word(fn)) == OBJ_TYPE_SYMBOL) {
