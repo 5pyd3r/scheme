@@ -20,8 +20,6 @@ static void skip_ws(const char* s, int* pos) {
 }
 
 static word read_atom(vm_state_t* vm, const char* s, int* pos) {
-    int start = *pos;
-
     // Boolean: #t / #f
     if (s[*pos] == '#' && s[*pos + 1] == 't') { *pos += 2; return word_true(); }
     if (s[*pos] == '#' && s[*pos + 1] == 'f') { *pos += 2; return word_false(); }
