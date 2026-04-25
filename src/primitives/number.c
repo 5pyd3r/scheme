@@ -1,5 +1,6 @@
 #include "prim.h"
 #include <string.h>
+#include <stdlib.h>
 
 // ============================================================
 // Bignum representation
@@ -219,6 +220,305 @@ static inline bool fixnum_mul_overflows(int64_t a, int64_t b) {
 }
 
 // ============================================================
+// Bignum multiplication, GCD, division, string conversion
+// ============================================================
+
+static word bignum_mul(vm_state_t* vm, word a, word b) {
+    word* ha = ptr_from_word(a);
+    word* hb = ptr_from_word(b);
+    int sa = (int)bignum_sign(ha), sb = (int)bignum_sign(hb);
+    size_t na = bignum_count(ha), nb = bignum_count(hb);
+    // Product requires at most na + nb limbs, zero-initialized by make_bignum
+    word* hr = ptr_from_word(make_bignum(vm, sa != sb ? 1 : 0, na + nb));
+    uint32_t* la = bignum_limbs(ha);
+    uint32_t* lb = bignum_limbs(hb);
+    uint32_t* lr = bignum_limbs(hr);
+    for (size_t i = 0; i < na; i++) {
+        uint64_t carry = 0;
+        for (size_t j = 0; j < nb; j++) {
+            uint64_t product = (uint64_t)la[i] * lb[j] + lr[i + j] + carry;
+            lr[i + j] = (uint32_t)product;
+            carry = product >> 32;
+        }
+        lr[i + nb] = (uint32_t)carry;
+    }
+    return bignum_to_fixnum_or_box(bignum_normalize(ptr_to_word(hr)));
+}
+
+// GCD helper functions
+static inline bool bignum_zerop(word b) {
+    return bignum_count(ptr_from_word(b)) == 0;
+}
+
+static word bignum_abs(vm_state_t* vm, word b) {
+    word* hdr = ptr_from_word(b);
+    size_t nc = bignum_count(hdr);
+    if (nc == 0 || bignum_sign(hdr) == 0) return b;
+    word* hr = ptr_from_word(make_bignum(vm, 0, nc));
+    memcpy(bignum_limbs(hr), bignum_limbs(hdr), nc * sizeof(uint32_t));
+    return ptr_to_word(hr);
+}
+
+static inline bool bignum_is_even(word b) {
+    word* hdr = ptr_from_word(b);
+    if (bignum_count(hdr) == 0) return true;
+    return (bignum_limbs(hdr)[0] & 1) == 0;
+}
+
+static word bignum_halve(vm_state_t* vm, word b) {
+    word* hdr = ptr_from_word(b);
+    size_t nc = bignum_count(hdr);
+    if (nc == 0) return b;
+    word* hr = ptr_from_word(make_bignum(vm, bignum_sign(hdr), nc));
+    uint32_t* limbs = bignum_limbs(hdr);
+    uint32_t* lr = bignum_limbs(hr);
+    uint32_t carry = 0;
+    for (size_t i = nc; i > 0; i--) {
+        uint64_t cur = ((uint64_t)carry << 32) | limbs[i - 1];
+        lr[i - 1] = (uint32_t)(cur >> 1);
+        carry = (uint32_t)(cur & 1);
+    }
+    return bignum_normalize(ptr_to_word(hr));
+}
+
+static word bignum_double(vm_state_t* vm, word b) {
+    word* hdr = ptr_from_word(b);
+    size_t nc = bignum_count(hdr);
+    if (nc == 0) return b;
+    word* hr = ptr_from_word(make_bignum(vm, bignum_sign(hdr), nc + 1));
+    uint32_t* limbs = bignum_limbs(hdr);
+    uint32_t* lr = bignum_limbs(hr);
+    uint32_t carry = 0;
+    for (size_t i = 0; i < nc; i++) {
+        uint64_t cur = ((uint64_t)limbs[i] << 1) | carry;
+        lr[i] = (uint32_t)cur;
+        carry = (uint32_t)(cur >> 32);
+    }
+    lr[nc] = carry;
+    return bignum_normalize(ptr_to_word(hr));
+}
+
+// Binary GCD (Stein's algorithm)
+static word bignum_gcd(vm_state_t* vm, word a, word b) {
+    a = bignum_abs(vm, a);
+    b = bignum_abs(vm, b);
+
+    if (bignum_zerop(a)) return b;
+    if (bignum_zerop(b)) return a;
+
+    int shift = 0;
+    while (bignum_is_even(a) && bignum_is_even(b)) {
+        a = bignum_halve(vm, a);
+        b = bignum_halve(vm, b);
+        shift++;
+    }
+    while (bignum_is_even(a)) a = bignum_halve(vm, a);
+    while (bignum_is_even(b)) b = bignum_halve(vm, b);
+
+    while (!bignum_zerop(a)) {
+        if (bignum_cmp(a, b) > 0) {
+            a = bignum_halve(vm, bignum_sub(vm, a, b));
+            while (bignum_is_even(a)) a = bignum_halve(vm, a);
+        } else {
+            b = bignum_halve(vm, bignum_sub(vm, b, a));
+            while (bignum_is_even(b)) b = bignum_halve(vm, b);
+        }
+    }
+
+    word result = b;
+    while (shift--) result = bignum_double(vm, result);
+    return result;
+}
+
+// Bignum division: quotient = a / b, *mod_out = a % b
+static word bignum_divmod(vm_state_t* vm, word a, word b, word* mod_out) {
+    word* ha = ptr_from_word(a);
+    word* hb = ptr_from_word(b);
+    int sa = (int)bignum_sign(ha), sb = (int)bignum_sign(hb);
+    size_t na = bignum_count(ha), nb = bignum_count(hb);
+
+    if (nb == 0) { vm->error_code = 1; return word_nil(); }
+
+    // |a| < |b|: quotient 0, remainder = a
+    if (na < nb || (na == nb && bignum_cmp_abs(a, b) < 0)) {
+        if (mod_out) *mod_out = a;
+        return bignum_from_int64(vm, 0);
+    }
+
+    // |a| == |b|: quotient +/-1, remainder 0
+    if (na == nb && bignum_cmp_abs(a, b) == 0) {
+        if (mod_out) *mod_out = bignum_from_int64(vm, 0);
+        return bignum_from_int64(vm, sa == sb ? 1 : -1);
+    }
+
+    // Single-limb divisor fast path
+    if (nb == 1) {
+        uint64_t rem = 0;
+        uint32_t divisor = bignum_limbs(hb)[0];
+        size_t nq = na;
+        word* hq = ptr_from_word(make_bignum(vm, sa != sb ? 1 : 0, nq));
+        uint32_t* la = bignum_limbs(ha);
+        uint32_t* lq = bignum_limbs(hq);
+        for (size_t i = na; i > 0; i--) {
+            uint64_t dividend = (rem << 32) | la[i - 1];
+            lq[i - 1] = (uint32_t)(dividend / divisor);
+            rem = dividend % divisor;
+        }
+        word quo = bignum_normalize(ptr_to_word(hq));
+        if (mod_out) *mod_out = bignum_from_int64(vm, (int64_t)rem);
+        return bignum_to_fixnum_or_box(quo);
+    }
+
+    // Full Knuth algorithm D (TAOCP Vol 2, 4.3.1) for nb >= 2
+    // D1: Normalize -- make top limb of divisor >= 2^31
+    uint32_t v_top = bignum_limbs(hb)[nb - 1];
+    uint32_t norm = (uint32_t)(((uint64_t)1 << 32) / ((uint64_t)v_top + 1));
+
+    size_t nu = na + 1; // normalized dividend: a * norm, stored in nu limbs
+    word* hu = ptr_from_word(make_bignum(vm, 0, nu));
+    word* hv = ptr_from_word(make_bignum(vm, 0, nb));
+    uint32_t* lu = bignum_limbs(hu);
+    uint32_t* lv = bignum_limbs(hv);
+
+    // u = a * norm
+    uint64_t carry = 0;
+    for (size_t i = 0; i < na; i++) {
+        uint64_t prod = (uint64_t)bignum_limbs(ha)[i] * norm + carry;
+        lu[i] = (uint32_t)prod;
+        carry = prod >> 32;
+    }
+    lu[na] = (uint32_t)carry;
+
+    // v = b * norm
+    carry = 0;
+    for (size_t i = 0; i < nb; i++) {
+        uint64_t prod = (uint64_t)bignum_limbs(hb)[i] * norm + carry;
+        lv[i] = (uint32_t)prod;
+        carry = prod >> 32;
+    }
+
+    // Quotient has na - nb + 1 limbs
+    size_t nq = na - nb + 1;
+    word* hq = ptr_from_word(make_bignum(vm, sa != sb ? 1 : 0, nq));
+    uint32_t* lq = bignum_limbs(hq);
+
+    // D2: Loop over j = nq down to 1
+    for (size_t j = nq; j > 0; j--) {
+        size_t jj = j - 1;
+
+        // D3: Estimate quotient digit
+        uint64_t u_digit = ((uint64_t)lu[jj + nb] << 32) | lu[jj + nb - 1];
+        uint64_t v_digit = lv[nb - 1];
+        uint64_t q_hat = u_digit / v_digit;
+        if (q_hat > 0xFFFFFFFFULL) q_hat = 0xFFFFFFFFULL;
+
+        // D4: Multiply and subtract
+        uint64_t carry_mul = 0;
+        uint64_t borrow = 0;
+        for (size_t i = 0; i < nb; i++) {
+            uint64_t prod = q_hat * lv[i] + carry_mul;
+            carry_mul = prod >> 32;
+            int64_t diff = (int64_t)lu[jj + i] - (int64_t)(uint32_t)prod - (int64_t)borrow;
+            lu[jj + i] = (uint32_t)(uint64_t)diff;
+            borrow = (diff < 0) ? 1 : 0;
+        }
+        int64_t diff = (int64_t)lu[jj + nb] - (int64_t)(uint32_t)carry_mul - (int64_t)borrow;
+        lu[jj + nb] = (uint32_t)(uint64_t)diff;
+
+        // D5: Test remainder -- if negative, q_hat was too big
+        if ((int64_t)diff < 0) {
+            q_hat--;
+            uint64_t add_carry = 0;
+            for (size_t i = 0; i < nb; i++) {
+                uint64_t sum = (uint64_t)lu[jj + i] + lv[i] + add_carry;
+                lu[jj + i] = (uint32_t)sum;
+                add_carry = sum >> 32;
+            }
+            lu[jj + nb] += (uint32_t)add_carry;
+        }
+
+        lq[jj] = (uint32_t)q_hat;
+    }
+
+    word quotient = bignum_to_fixnum_or_box(bignum_normalize(ptr_to_word(hq)));
+
+    // D8: Denormalize remainder
+    if (mod_out) {
+        if (norm > 1) {
+            uint64_t rem = 0;
+            for (size_t i = nb; i > 0; i--) {
+                uint64_t val = (rem << 32) | lu[i - 1];
+                lu[i - 1] = (uint32_t)(val / norm);
+                rem = val % norm;
+            }
+        }
+        word* hrem = ptr_from_word(make_bignum(vm, sa ? 1 : 0, nb));
+        memcpy(bignum_limbs(hrem), lu, nb * sizeof(uint32_t));
+        *mod_out = bignum_normalize(ptr_to_word(hrem));
+    }
+
+    return quotient;
+}
+
+// Convert string to bignum
+static word bignum_from_string(vm_state_t* vm, const char* s, int radix) {
+    while (*s == ' ' || *s == '\t' || *s == '\n') s++;
+    int sign = 0;
+    if (*s == '-') { sign = 1; s++; }
+    else if (*s == '+') s++;
+
+    word result = bignum_from_int64(vm, 0);
+    word rad = bignum_from_int64(vm, radix);
+    while (*s >= '0' && *s <= '9') {
+        int d = *s - '0';
+        result = bignum_mul(vm, result, rad);
+        result = bignum_add(vm, result, bignum_from_int64(vm, d));
+        s++;
+    }
+
+    if (sign) result = bignum_negate(vm, result);
+    return bignum_to_fixnum_or_box(result);
+}
+
+// Convert bignum to malloc'd string -- caller must free
+static char* bignum_to_string(vm_state_t* vm, word b, int radix) {
+    word* hdr = ptr_from_word(b);
+    size_t nc = bignum_count(hdr);
+    if (nc == 0) {
+        char* s = (char*)malloc(2);
+        s[0] = '0'; s[1] = '\0';
+        return s;
+    }
+
+    // Upper bound: ceil(nc * 32 / log2(10)) + 2 ~= nc * 10 + 2
+    int max_digits = (int)nc * 10 + 2;
+    char* result = (char*)malloc((size_t)max_digits + 2);
+    int pos = max_digits;
+    result[pos] = '\0';
+
+    // We need a temporary bignum for repeated division
+    word abs_b = bignum_abs(vm, b);
+    static const char digits[] = "0123456789abcdef";
+
+    while (bignum_count(ptr_from_word(abs_b)) > 0) {
+        word rem;
+        abs_b = bignum_divmod(vm, abs_b, bignum_from_int64(vm, radix), &rem);
+        word* hrem = ptr_from_word(rem);
+        uint32_t digit = bignum_count(hrem) > 0 ? bignum_limbs(hrem)[0] : 0;
+        result[--pos] = digits[digit % radix];
+    }
+
+    if (bignum_sign(hdr))
+        result[--pos] = '-';
+
+    char* out = (char*)malloc((size_t)(max_digits - pos + 1));
+    memcpy(out, result + pos, (size_t)(max_digits - pos));
+    out[max_digits - pos] = '\0';
+    free(result);
+    return out;
+}
+
+// ============================================================
 // Fixnum-only arithmetic primitives (temporary — will be replaced
 // by type-dispatch in Task 4)
 // ============================================================
@@ -282,8 +582,16 @@ word prim_mul(vm_state_t* vm, int nargs) {
         word w = vm->sp[i];
         if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
         if (i == 0) { product = word_to_fixnum(w); continue; }
-        // Use unsigned multiplication to avoid signed overflow UB.
-        // bignum_mul promotion will be added in Task 2.
+        if (fixnum_mul_overflows(product, word_to_fixnum(w))) {
+            word acc = bignum_from_int64(vm, product);
+            acc = bignum_mul(vm, acc, bignum_from_int64(vm, word_to_fixnum(w)));
+            for (i++; i < nargs; i++) {
+                w = vm->sp[i];
+                if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
+                acc = bignum_mul(vm, acc, bignum_from_int64(vm, word_to_fixnum(w)));
+            }
+            return bignum_to_fixnum_or_box(acc);
+        }
         product = (int64_t)((uint64_t)product * (uint64_t)word_to_fixnum(w));
     }
     return word_from_fixnum(product);

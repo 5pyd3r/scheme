@@ -114,6 +114,39 @@ int main(void) {
     r = prim_add(vm, 2);
     CHECK(!is_fixnum(r), "INT62_MAX + 2 → not fixnum");
 
+    // === bignum multiplication via overflow ===
+    // (2^31)^2 = 2^62 -> overflows fixnum -> bignum
+    int64_t v = (int64_t)1 << 31;
+    vm->sp[0] = word_from_fixnum(v);
+    vm->sp[1] = word_from_fixnum(v);
+    r = prim_mul(vm, 2);
+    CHECK(!is_fixnum(r), "2^31 * 2^31 overflows to bignum");
+
+    // 1000000 * 1000000 = 10^12, fits in fixnum
+    vm->sp[0] = word_from_fixnum(1000000);
+    vm->sp[1] = word_from_fixnum(1000000);
+    r = prim_mul(vm, 2);
+    CHECK(is_fixnum(r) && word_to_fixnum(r) == 1000000000000LL, "1M * 1M = 1T");
+
+    // bignum multiplication chain: 2^31 * 2^31 * 2^31 = 2^93
+    vm->sp[0] = word_from_fixnum(v);
+    vm->sp[1] = word_from_fixnum(v);
+    vm->sp[2] = word_from_fixnum(v);
+    r = prim_mul(vm, 3);
+    CHECK(!is_fixnum(r), "2^31 * 2^31 * 2^31 overflows to bignum");
+
+    // no overflow tests: basic fixnum mul
+    vm->sp[0] = word_from_fixnum(-6);
+    vm->sp[1] = word_from_fixnum(7);
+    r = prim_mul(vm, 2);
+    CHECK(is_fixnum(r) && word_to_fixnum(r) == -42, "fixnum -6*7=-42");
+
+    // fixnum * 0 = 0
+    vm->sp[0] = word_from_fixnum(1000000);
+    vm->sp[1] = word_from_fixnum(0);
+    r = prim_mul(vm, 2);
+    CHECK(is_fixnum(r) && word_to_fixnum(r) == 0, "fixnum 1M*0=0");
+
     if (n_failures == 0)
         printf("ALL number tests PASSED\n");
     return n_failures;
