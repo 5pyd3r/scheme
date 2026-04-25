@@ -68,6 +68,17 @@ word prim_log(vm_state_t* vm, int nargs);
 word prim_find_global_slot(vm_state_t* vm, int nargs);
 word prim_create_global_slot(vm_state_t* vm, int nargs);
 
+word prim_list(vm_state_t* vm, int nargs);
+word prim_vectorp(vm_state_t* vm, int nargs);
+word prim_make_vector(vm_state_t* vm, int nargs);
+word prim_vector(vm_state_t* vm, int nargs);
+word prim_vector_length(vm_state_t* vm, int nargs);
+word prim_vector_ref(vm_state_t* vm, int nargs);
+word prim_vector_set(vm_state_t* vm, int nargs);
+word prim_list_to_vector(vm_state_t* vm, int nargs);
+word prim_vector_to_list(vm_state_t* vm, int nargs);
+word prim_equal(vm_state_t* vm, int nargs);
+
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
     word pair = vm->sp[0];
@@ -224,6 +235,16 @@ static prim_entry_t prim_table[] = {
     {"log",            prim_log},
     {"find-global-slot",   prim_find_global_slot},
     {"create-global-slot", prim_create_global_slot},
+    {"list",             prim_list},
+    {"vector?",          prim_vectorp},
+    {"make-vector",      prim_make_vector},
+    {"vector",           prim_vector},
+    {"vector-length",    prim_vector_length},
+    {"vector-ref",       prim_vector_ref},
+    {"vector-set!",      prim_vector_set},
+    {"list->vector",     prim_list_to_vector},
+    {"vector->list",     prim_vector_to_list},
+    {"equal?",           prim_equal},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 

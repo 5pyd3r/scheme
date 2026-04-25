@@ -9,6 +9,7 @@ scheme_core_sources = files(
   'primitives/pair.c',
   'primitives/port.c',
   'primitives/symbol.c',
+  'primitives/vector.c',
 )
 
 scheme_inc = include_directories('include')

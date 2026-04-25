@@ -23,3 +23,11 @@ test_number = executable('test_number',
   link_args: ['-lm'],
 )
 test('number', test_number)
+
+test_listvec = executable('test_listvec',
+  'test_listvec.c',
+  include_directories: test_scheme_inc,
+  link_with: scheme_core,
+  link_args: ['-lm'],
+)
+test('listvec', test_listvec)
