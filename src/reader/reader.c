@@ -30,6 +30,24 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
     // Character: #\name
     if (s[*pos] == '#' && s[*pos + 1] == '\\') {
         *pos += 2;
+        // Named characters
+        if (strncmp(s + *pos, "space", 5) == 0 && !isalnum(s[*pos + 5])) {
+            *pos += 5;
+            return word_from_char(' ');
+        }
+        if (strncmp(s + *pos, "newline", 7) == 0 && !isalnum(s[*pos + 7])) {
+            *pos += 7;
+            return word_from_char('\n');
+        }
+        if (strncmp(s + *pos, "tab", 3) == 0 && !isalnum(s[*pos + 3])) {
+            *pos += 3;
+            return word_from_char('\t');
+        }
+        if (strncmp(s + *pos, "return", 6) == 0 && !isalnum(s[*pos + 6])) {
+            *pos += 6;
+            return word_from_char('\r');
+        }
+        // Single character
         char c = s[*pos]; (*pos)++;
         return word_from_char((unsigned char)c);
     }
