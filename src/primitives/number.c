@@ -133,7 +133,7 @@ static int bignum_cmp(word a, word b) {
     return sa ? -cmp : cmp;
 }
 
-// Pure-functional bignum addition
+// Pure-functional bignum addition — always returns bignum (no fixnum unboxing)
 static word bignum_add(vm_state_t* vm, word a, word b) {
     word* ha = ptr_from_word(a);
     word* hb = ptr_from_word(b);
@@ -154,11 +154,12 @@ static word bignum_add(vm_state_t* vm, word a, word b) {
             lr[i] = (uint32_t)sum;
             carry = sum >> 32;
         }
-        return bignum_to_fixnum_or_box(bignum_normalize(ptr_to_word(hr)));
+        return bignum_normalize(ptr_to_word(hr));
     } else {
         int cmp = bignum_cmp_abs(a, b);
         if (cmp == 0) {
-            return word_from_fixnum(0);
+            word* hz = ptr_from_word(make_bignum(vm, 0, 0));
+            return ptr_to_word(hz);
         }
         word* big = ptr_from_word(cmp > 0 ? a : b);
         word* small = ptr_from_word(cmp > 0 ? b : a);
@@ -176,7 +177,7 @@ static word bignum_add(vm_state_t* vm, word a, word b) {
             lr[i] = (uint32_t)diff;
             borrow = (diff >> 32) ? 1 : 0;
         }
-        return bignum_to_fixnum_or_box(bignum_normalize(ptr_to_word(hr)));
+        return bignum_normalize(ptr_to_word(hr));
     }
 }
 
@@ -242,7 +243,7 @@ static word bignum_mul(vm_state_t* vm, word a, word b) {
         }
         lr[i + nb] = (uint32_t)carry;
     }
-    return bignum_to_fixnum_or_box(bignum_normalize(ptr_to_word(hr)));
+    return bignum_normalize(ptr_to_word(hr));
 }
 
 // GCD helper functions
@@ -365,8 +366,13 @@ static word bignum_divmod(vm_state_t* vm, word a, word b, word* mod_out) {
             rem = dividend % divisor;
         }
         word quo = bignum_normalize(ptr_to_word(hq));
-        if (mod_out) *mod_out = bignum_from_int64(vm, (int64_t)rem);
-        return bignum_to_fixnum_or_box(quo);
+        if (mod_out) {
+            // Remainder sign follows dividend's sign, matching Knuth path
+            word* hrem = ptr_from_word(make_bignum(vm, sa ? 1 : 0, rem ? 1 : 0));
+            if (rem) bignum_limbs(hrem)[0] = (uint32_t)rem;
+            *mod_out = bignum_normalize(ptr_to_word(hrem));
+        }
+        return quo;
     }
 
     // Full Knuth algorithm D (TAOCP Vol 2, 4.3.1) for nb >= 2
@@ -440,7 +446,7 @@ static word bignum_divmod(vm_state_t* vm, word a, word b, word* mod_out) {
         lq[jj] = (uint32_t)q_hat;
     }
 
-    word quotient = bignum_to_fixnum_or_box(bignum_normalize(ptr_to_word(hq)));
+    word quotient = bignum_normalize(ptr_to_word(hq));
 
     // D8: Denormalize remainder
     if (mod_out) {
@@ -477,7 +483,7 @@ static word bignum_from_string(vm_state_t* vm, const char* s, int radix) {
     }
 
     if (sign) result = bignum_negate(vm, result);
-    return bignum_to_fixnum_or_box(result);
+    return result;
 }
 
 // Convert bignum to malloc'd string -- caller must free
