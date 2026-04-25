@@ -330,6 +330,37 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             break;
         }
 
+        case OP_MAKE_VEC: {
+            uint8_t len = read_u8(&vm->ip);
+            size_t nwords = 3 + (size_t)len;
+            word* vec = vm->gc->alloc_words(nwords);
+            obj_set_type(vec, OBJ_TYPE_VECTOR);
+            vec[DATA_START_INDEX] = (word)len;
+            for (int i = 0; i < len; i++)
+                vector_set(vec, i, word_nil());
+            *++vm->sp = ptr_to_word(vec);
+            break;
+        }
+
+        case OP_VEC_REF: {
+            word idx_w = *vm->sp--;
+            word vec_w = *vm->sp;
+            word* hdr = ptr_from_word(vec_w);
+            size_t idx = (size_t)word_to_fixnum(idx_w);
+            *vm->sp = vector_elem(hdr, idx);
+            break;
+        }
+
+        case OP_VEC_SET: {
+            word val = *vm->sp--;
+            word idx_w = *vm->sp--;
+            word vec_w = *vm->sp;
+            word* hdr = ptr_from_word(vec_w);
+            size_t idx = (size_t)word_to_fixnum(idx_w);
+            vector_set(hdr, idx, val);
+            break;
+        }
+
         case OP_HALT:
             return *vm->sp;
 
