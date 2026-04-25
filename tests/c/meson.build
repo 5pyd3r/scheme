@@ -47,3 +47,11 @@ test_string = executable('test_string',
   link_args: ['-lm'],
 )
 test('string', test_string)
+
+test_bytevector = executable('test_bytevector',
+  'test_bytevector.c',
+  include_directories: test_scheme_inc,
+  link_with: scheme_core,
+  link_args: ['-lm'],
+)
+test('bytevector', test_bytevector)

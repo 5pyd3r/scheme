@@ -11,6 +11,7 @@ scheme_core_sources = files(
   'primitives/symbol.c',
   'primitives/char.c',
   'primitives/string.c',
+  'primitives/bytevector.c',
   'primitives/vector.c',
 )
 

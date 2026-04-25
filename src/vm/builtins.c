@@ -97,6 +97,15 @@ word prim_string_lt(vm_state_t* vm, int nargs);
 word prim_string_to_list(vm_state_t* vm, int nargs);
 word prim_list_to_string(vm_state_t* vm, int nargs);
 
+word prim_bytevectorp(vm_state_t* vm, int nargs);
+word prim_make_bytevector(vm_state_t* vm, int nargs);
+word prim_bytevector(vm_state_t* vm, int nargs);
+word prim_bytevector_length(vm_state_t* vm, int nargs);
+word prim_bytevector_u8_ref(vm_state_t* vm, int nargs);
+word prim_bytevector_u8_set(vm_state_t* vm, int nargs);
+word prim_bytevector_to_u8_list(vm_state_t* vm, int nargs);
+word prim_u8_list_to_bytevector(vm_state_t* vm, int nargs);
+
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
     word pair = vm->sp[0];
@@ -281,6 +290,14 @@ static prim_entry_t prim_table[] = {
     {"string<?",          prim_string_lt},
     {"string->list",      prim_string_to_list},
     {"list->string",      prim_list_to_string},
+    {"bytevector?",           prim_bytevectorp},
+    {"make-bytevector",       prim_make_bytevector},
+    {"bytevector",            prim_bytevector},
+    {"bytevector-length",     prim_bytevector_length},
+    {"bytevector-u8-ref",     prim_bytevector_u8_ref},
+    {"bytevector-u8-set!",    prim_bytevector_u8_set},
+    {"bytevector->u8-list",   prim_bytevector_to_u8_list},
+    {"u8-list->bytevector",   prim_u8_list_to_bytevector},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 
