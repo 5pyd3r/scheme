@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 static void* pal_mmap_alloc(size_t size) {
     void* p = mmap(NULL, size, PROT_READ | PROT_WRITE,
