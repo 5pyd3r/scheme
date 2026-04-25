@@ -477,11 +477,16 @@ static word bignum_from_string(vm_state_t* vm, const char* s, int radix) {
 
     word result = bignum_from_int64(vm, 0);
     word rad = bignum_from_int64(vm, radix);
-    while (*s >= '0' && *s <= '9') {
-        int d = *s - '0';
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        int d;
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else break;
+        if (d >= radix) break;
         result = bignum_mul(vm, result, rad);
         result = bignum_add(vm, result, bignum_from_int64(vm, d));
-        s++;
     }
 
     if (sign) result = bignum_negate(vm, result);
