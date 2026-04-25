@@ -21,6 +21,7 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm->fp = vm->stack;
 
     vm->globals = (word*)calloc(INITIAL_GLOBALS, sizeof(word));
+    vm->global_names = (word*)calloc(INITIAL_GLOBALS, sizeof(word));
     vm->global_count = INITIAL_GLOBALS;
     vm->next_global_slot = 0;
 
@@ -44,6 +45,29 @@ int vm_load_code(vm_state_t* vm, word* code_obj) {
     vm->code_count = idx + 1;
     vm->code_objects[idx] = code_obj;
     return idx;
+}
+
+int vm_find_global_slot(vm_state_t* vm, word sym) {
+    if (!is_ptr(sym)) return -1;
+    word* sym_hdr = ptr_from_word(sym);
+    if (obj_type(sym_hdr) != OBJ_TYPE_SYMBOL) return -1;
+    int slen = (int)string_length(sym_hdr);
+    for (int i = 0; i < vm->next_global_slot; i++) {
+        word name = vm->global_names[i];
+        if (!is_ptr(name)) continue;
+        word* name_hdr = ptr_from_word(name);
+        if (obj_type(name_hdr) != OBJ_TYPE_SYMBOL) continue;
+        int nlen = (int)string_length(name_hdr);
+        if (nlen != slen) continue;
+        int match = 1;
+        for (int j = 0; j < slen; j++) {
+            if (string_ref(sym_hdr, j) != string_ref(name_hdr, j)) {
+                match = 0; break;
+            }
+        }
+        if (match) return i;
+    }
+    return -1;
 }
 
 static uint8_t  read_u8(uint8_t** ip)     { return *(*ip)++; }
@@ -202,16 +226,17 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             word closure_val = vm->sp[-nargs];
             word* clo = ptr_from_word(closure_val);
 
-            word* base = vm->sp - nargs;
+            word* base = vm->sp - nargs;  // base[0]=closure, base[1]=arg1
 
-            // Save caller sp (pointing to base+3, where return value will go)
+            // Save caller sp (pointing past frame header, where return value will go)
             word old_sp = (word)(uintptr_t)(base + 3);
 
-            // Shift args up by 4 (to make room for frame header)
-            for (int i = nargs; i >= 0; i--)
-                base[i + 4] = base[i];
+            // Shift args (base[1..nargs]) up by 3 to make room for 4-word frame header
+            // base[4] = arg1 = fp[1], base[5] = arg2 = fp[2], ...
+            for (int i = nargs; i >= 1; i--)
+                base[i + 3] = base[i];
 
-            // Save frame header (4 words)
+            // Save frame header (4 words) — base[0..3]
             base[0] = old_sp;
             base[1] = (word)(uintptr_t)vm->ip;   // saved_ip
             base[2] = (word)(uintptr_t)vm->env;  // saved_env

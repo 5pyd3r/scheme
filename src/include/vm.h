@@ -25,6 +25,7 @@ typedef struct vm_state {
     word*   current_code;
 
     word*   globals;
+    word*   global_names;    // parallel array tracking which symbol each slot belongs to
     size_t  global_count;
     int     next_global_slot;
 
@@ -40,5 +41,6 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal);
 int vm_load_code(vm_state_t* vm, word* code_obj);
 word vm_execute(vm_state_t* vm, int entry_point);
 int vm_register_prim(vm_state_t* vm, word prim);
+int vm_find_global_slot(vm_state_t* vm, word sym);
 
 #endif

@@ -145,12 +145,15 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             compile_lambda(buf, vm, form_args, form_body, scope);
 
             // Store to global slot for fn_sym
+            word fn_sym = pair_car(ptr_from_word(name_or_form));
             int slot = vm->next_global_slot++;
             if (slot >= (int)vm->global_count) {
                 size_t new_count = vm->global_count * 2;
                 vm->globals = realloc(vm->globals, new_count * sizeof(word));
+                vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
                 vm->global_count = new_count;
             }
+            vm->global_names[slot] = fn_sym;
             emit_byte(buf, OP_GSET);
             emit_byte(buf, (uint8_t)slot);
             return;
@@ -159,12 +162,15 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         // Simple define: (define x val)
         word val_expr = pair_car(ptr_from_word(pair_cdr(ahdr)));
         compile_expr_to_buf(buf, vm, val_expr, scope);
+        word name_sym = name_or_form;
         int slot = vm->next_global_slot++;
         if (slot >= (int)vm->global_count) {
             size_t new_count = vm->global_count * 2;
             vm->globals = realloc(vm->globals, new_count * sizeof(word));
+            vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
             vm->global_count = new_count;
         }
+        vm->global_names[slot] = name_sym;
         emit_byte(buf, OP_GSET);
         emit_byte(buf, (uint8_t)slot);
         return;
@@ -285,9 +291,21 @@ static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, loca
                 return;
             }
         }
-        int idx = add_const(buf, expr);
+        // Look up global slot by symbol name
+        int slot = vm_find_global_slot(vm, expr);
+        if (slot < 0) {
+            // Undefined — create slot on demand
+            slot = vm->next_global_slot++;
+            if (slot >= (int)vm->global_count) {
+                size_t new_count = vm->global_count * 2;
+                vm->globals = realloc(vm->globals, new_count * sizeof(word));
+                vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
+                vm->global_count = new_count;
+            }
+            vm->global_names[slot] = expr;
+        }
         emit_byte(buf, OP_GREF);
-        emit_byte(buf, (uint8_t)idx);
+        emit_byte(buf, (uint8_t)slot);
         return;
     }
 
