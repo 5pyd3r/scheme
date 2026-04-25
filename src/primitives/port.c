@@ -1,6 +1,10 @@
 #include "prim.h"
 #include "reader.h"
 #include <stdio.h>
+#include <stdlib.h>
+
+extern double word_to_double(word w);
+extern char* bignum_to_string(vm_state_t* vm, word b, int radix);
 
 word prim_display(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_code = 1; return word_nil(); }
@@ -27,6 +31,20 @@ word prim_display(vm_state_t* vm, int nargs) {
         case OBJ_TYPE_PAIR:
             printf("#<pair>");
             break;
+        case OBJ_TYPE_BIGNUM: {
+            char* s = bignum_to_string(vm, w, 10);
+            printf("%s", s);
+            free(s);
+            break;
+        }
+        case OBJ_TYPE_FLONUM: {
+            double d = word_to_double(w);
+            if (d == (long long)d && d != -9223372036854775808.0)
+                printf("%lld.0", (long long)d);
+            else
+                printf("%.17g", d);
+            break;
+        }
         default:
             printf("#<obj>");
             break;

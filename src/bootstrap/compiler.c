@@ -139,21 +139,42 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         if (is_ptr(name_or_form) && obj_type(ptr_from_word(name_or_form)) == OBJ_TYPE_PAIR) {
             // Chain define: (define (f x) body) -> (define f (lambda (x) body))
             word form_args = pair_cdr(ptr_from_word(name_or_form));
-            word form_body = pair_car(ptr_from_word(pair_cdr(ahdr)));
+            word body_list = pair_cdr(ahdr);
+            word* body_list_hdr = ptr_from_word(body_list);
+            word form_body;
+            if (is_ptr(pair_cdr(body_list_hdr)) &&
+                obj_type(ptr_from_word(pair_cdr(body_list_hdr))) == OBJ_TYPE_PAIR) {
+                // Multiple body expressions — wrap in (begin ...)
+                word* bsym = vm->gc->alloc_words(3 + 5);
+                obj_set_type(bsym, OBJ_TYPE_SYMBOL);
+                bsym[DATA_START_INDEX] = (word)5;
+                const char* bname = "begin";
+                for (int bi = 0; bi < 5; bi++)
+                    string_set(bsym, bi, word_from_char((unsigned char)bname[bi]));
+                word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+                pair_car(bp) = ptr_to_word(bsym);
+                pair_cdr(bp) = body_list;
+                form_body = ptr_to_word(bp);
+            } else {
+                form_body = pair_car(body_list_hdr);
+            }
 
             // Compile lambda
             compile_lambda(buf, vm, form_args, form_body, scope);
 
             // Store to global slot for fn_sym
             word fn_sym = pair_car(ptr_from_word(name_or_form));
-            int slot = vm->next_global_slot++;
-            if (slot >= (int)vm->global_count) {
-                size_t new_count = vm->global_count * 2;
-                vm->globals = realloc(vm->globals, new_count * sizeof(word));
-                vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
-                vm->global_count = new_count;
+            int slot = vm_find_global_slot(vm, fn_sym);
+            if (slot < 0) {
+                slot = vm->next_global_slot++;
+                if (slot >= (int)vm->global_count) {
+                    size_t new_count = vm->global_count * 2;
+                    vm->globals = realloc(vm->globals, new_count * sizeof(word));
+                    vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
+                    vm->global_count = new_count;
+                }
+                vm->global_names[slot] = fn_sym;
             }
-            vm->global_names[slot] = fn_sym;
             emit_byte(buf, OP_GSET);
             emit_byte(buf, (uint8_t)slot);
             return;
@@ -163,14 +184,17 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         word val_expr = pair_car(ptr_from_word(pair_cdr(ahdr)));
         compile_expr_to_buf(buf, vm, val_expr, scope);
         word name_sym = name_or_form;
-        int slot = vm->next_global_slot++;
-        if (slot >= (int)vm->global_count) {
-            size_t new_count = vm->global_count * 2;
-            vm->globals = realloc(vm->globals, new_count * sizeof(word));
-            vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
-            vm->global_count = new_count;
+        int slot = vm_find_global_slot(vm, name_sym);
+        if (slot < 0) {
+            slot = vm->next_global_slot++;
+            if (slot >= (int)vm->global_count) {
+                size_t new_count = vm->global_count * 2;
+                vm->globals = realloc(vm->globals, new_count * sizeof(word));
+                vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
+                vm->global_count = new_count;
+            }
+            vm->global_names[slot] = name_sym;
         }
-        vm->global_names[slot] = name_sym;
         emit_byte(buf, OP_GSET);
         emit_byte(buf, (uint8_t)slot);
         return;
@@ -212,7 +236,25 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
     if (is_symbol(fn, "lambda")) {
         word* ahdr = ptr_from_word(args);
         word params = pair_car(ahdr);
-        word body = pair_car(ptr_from_word(pair_cdr(ahdr)));
+        word body_list = pair_cdr(ahdr);
+        word* body_list_hdr = ptr_from_word(body_list);
+        word body;
+        if (is_ptr(pair_cdr(body_list_hdr)) &&
+            obj_type(ptr_from_word(pair_cdr(body_list_hdr))) == OBJ_TYPE_PAIR) {
+            // Multiple body expressions — wrap in (begin ...)
+            word* bsym = vm->gc->alloc_words(3 + 5);
+            obj_set_type(bsym, OBJ_TYPE_SYMBOL);
+            bsym[DATA_START_INDEX] = (word)5;
+            const char* bname = "begin";
+            for (int bi = 0; bi < 5; bi++)
+                string_set(bsym, bi, word_from_char((unsigned char)bname[bi]));
+            word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+            pair_car(bp) = ptr_to_word(bsym);
+            pair_cdr(bp) = body_list;
+            body = ptr_to_word(bp);
+        } else {
+            body = pair_car(body_list_hdr);
+        }
         compile_lambda(buf, vm, params, body, scope);
         return;
     }

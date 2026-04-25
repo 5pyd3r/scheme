@@ -28,6 +28,10 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm->code_objects = (word**)calloc(64, sizeof(word*));
     vm->code_count = 0;
 
+    vm->symbol_table = NULL;
+    vm->symbol_count = 0;
+    vm->symbol_capacity = 0;
+
     return vm;
 }
 
@@ -88,6 +92,33 @@ int vm_find_global_by_name(vm_state_t* vm, const char* name) {
         if (match) return i;
     }
     return -1;
+}
+
+word vm_intern(vm_state_t* vm, const char* name, int len) {
+    for (size_t i = 0; i < vm->symbol_count; i++) {
+        word* hdr = ptr_from_word(vm->symbol_table[i]);
+        if ((int)string_length(hdr) != len) continue;
+        bool match = true;
+        for (int j = 0; j < len; j++) {
+            if (word_to_char(string_ref(hdr, j)) != (unsigned char)name[j]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return vm->symbol_table[i];
+    }
+    size_t nwords = 3 + len;
+    word* sym = vm->gc->alloc_words(nwords);
+    obj_set_type(sym, OBJ_TYPE_SYMBOL);
+    sym[DATA_START_INDEX] = (word)len;
+    for (int i = 0; i < len; i++)
+        string_set(sym, i, word_from_char((unsigned char)name[i]));
+    if (vm->symbol_count >= vm->symbol_capacity) {
+        vm->symbol_capacity = vm->symbol_capacity ? vm->symbol_capacity * 2 : 256;
+        vm->symbol_table = realloc(vm->symbol_table, vm->symbol_capacity * sizeof(word));
+    }
+    vm->symbol_table[vm->symbol_count++] = ptr_to_word(sym);
+    return ptr_to_word(sym);
 }
 
 static uint8_t  read_u8(uint8_t** ip)     { return *(*ip)++; }
@@ -247,8 +278,8 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             word* clo = ptr_from_word(*vm->sp);
             word* base = vm->sp - nargs;  // base[0..nargs-1] = args
 
-            // Save caller sp
-            word old_sp = (word)(uintptr_t)(base + 3);
+            // Save caller sp (restore to before first arg, so frame header is overwritten)
+            word old_sp = (word)(uintptr_t)(base - 1);
 
             // Shift args (base[0..nargs-1]) to base[4..nargs+3]
             for (int i = nargs - 1; i >= 0; i--)

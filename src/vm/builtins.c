@@ -2,6 +2,7 @@
 #include "opcodes.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 word prim_cons(vm_state_t* vm, int nargs);
 word prim_car(vm_state_t* vm, int nargs);
@@ -18,12 +19,54 @@ word prim_mul(vm_state_t* vm, int nargs);
 word prim_div(vm_state_t* vm, int nargs);
 word prim_lt(vm_state_t* vm, int nargs);
 word prim_gt(vm_state_t* vm, int nargs);
+word prim_eq_num(vm_state_t* vm, int nargs);
 word prim_display(vm_state_t* vm, int nargs);
 word prim_newline(vm_state_t* vm, int nargs);
 word prim_symbol_to_string(vm_state_t* vm, int nargs);
 word prim_prim_index(vm_state_t* vm, int nargs);
 word prim_assemble_code(vm_state_t* vm, int nargs);
 word prim_read(vm_state_t* vm, int nargs);
+word prim_fixnum_pred(vm_state_t* vm, int nargs);
+word prim_symbol_pred(vm_state_t* vm, int nargs);
+word prim_number_pred(vm_state_t* vm, int nargs);
+word prim_integer_pred(vm_state_t* vm, int nargs);
+word prim_exact_pred(vm_state_t* vm, int nargs);
+word prim_inexact_pred(vm_state_t* vm, int nargs);
+word prim_zerop(vm_state_t* vm, int nargs);
+word prim_positivep(vm_state_t* vm, int nargs);
+word prim_negativep(vm_state_t* vm, int nargs);
+word prim_evenp(vm_state_t* vm, int nargs);
+word prim_oddp(vm_state_t* vm, int nargs);
+word prim_quotient(vm_state_t* vm, int nargs);
+word prim_remainder(vm_state_t* vm, int nargs);
+word prim_modulo(vm_state_t* vm, int nargs);
+word prim_gcd(vm_state_t* vm, int nargs);
+word prim_lcm(vm_state_t* vm, int nargs);
+word prim_abs(vm_state_t* vm, int nargs);
+word prim_max(vm_state_t* vm, int nargs);
+word prim_min(vm_state_t* vm, int nargs);
+word prim_floor(vm_state_t* vm, int nargs);
+word prim_ceiling(vm_state_t* vm, int nargs);
+word prim_truncate(vm_state_t* vm, int nargs);
+word prim_round(vm_state_t* vm, int nargs);
+word prim_number_to_string(vm_state_t* vm, int nargs);
+word prim_string_to_number(vm_state_t* vm, int nargs);
+word prim_exact_to_inexact(vm_state_t* vm, int nargs);
+word prim_inexact_to_exact(vm_state_t* vm, int nargs);
+word prim_finitep(vm_state_t* vm, int nargs);
+word prim_infinitep(vm_state_t* vm, int nargs);
+word prim_nanp(vm_state_t* vm, int nargs);
+word prim_sin(vm_state_t* vm, int nargs);
+word prim_cos(vm_state_t* vm, int nargs);
+word prim_tan(vm_state_t* vm, int nargs);
+word prim_asin(vm_state_t* vm, int nargs);
+word prim_acos(vm_state_t* vm, int nargs);
+word prim_atan(vm_state_t* vm, int nargs);
+word prim_sqrt(vm_state_t* vm, int nargs);
+word prim_exp(vm_state_t* vm, int nargs);
+word prim_log(vm_state_t* vm, int nargs);
+word prim_find_global_slot(vm_state_t* vm, int nargs);
+word prim_create_global_slot(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
@@ -69,6 +112,49 @@ word prim_assemble_code(vm_state_t* vm, int nargs) {
     return word_from_fixnum(code_idx);
 }
 
+word prim_fixnum_pred(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_code = 1; return word_nil(); }
+    return is_fixnum(vm->sp[0]) ? word_true() : word_false();
+}
+
+word prim_symbol_pred(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_code = 1; return word_nil(); }
+    word w = vm->sp[0];
+    return (is_ptr(w) && obj_type(ptr_from_word(w)) == OBJ_TYPE_SYMBOL) ? word_true() : word_false();
+}
+
+word prim_find_global_slot(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
+    word sym = vm->sp[0];
+    int slot = vm_find_global_slot(vm, sym);
+    if (slot < 0) {
+        // Not found — create new slot
+        if (vm->next_global_slot >= (int)vm->global_count) {
+            size_t new_count = vm->global_count * 2;
+            vm->globals = realloc(vm->globals, new_count * sizeof(word));
+            vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
+            vm->global_count = new_count;
+        }
+        slot = vm->next_global_slot++;
+        vm->global_names[slot] = sym;
+    }
+    return word_from_fixnum(slot);
+}
+
+word prim_create_global_slot(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
+    word sym = vm->sp[0];
+    if (vm->next_global_slot >= (int)vm->global_count) {
+        size_t new_count = vm->global_count * 2;
+        vm->globals = realloc(vm->globals, new_count * sizeof(word));
+        vm->global_names = realloc(vm->global_names, new_count * sizeof(word));
+        vm->global_count = new_count;
+    }
+    int slot = vm->next_global_slot++;
+    vm->global_names[slot] = sym;
+    return word_from_fixnum(slot);
+}
+
 typedef struct {
     const char* name;
     prim_fn_t   fn;
@@ -90,12 +176,54 @@ static prim_entry_t prim_table[] = {
     {"/",        prim_div},
     {"<",        prim_lt},
     {">",        prim_gt},
+    {"=",        prim_eq_num},
     {"display",  prim_display},
     {"newline",  prim_newline},
     {"symbol->string", prim_symbol_to_string},
     {"prim-index",     prim_prim_index},
     {"assemble-code",  prim_assemble_code},
     {"read",           prim_read},
+    {"fixnum?",        prim_fixnum_pred},
+    {"symbol?",        prim_symbol_pred},
+    {"number?",        prim_number_pred},
+    {"integer?",       prim_integer_pred},
+    {"exact?",         prim_exact_pred},
+    {"inexact?",       prim_inexact_pred},
+    {"zero?",          prim_zerop},
+    {"positive?",      prim_positivep},
+    {"negative?",      prim_negativep},
+    {"even?",          prim_evenp},
+    {"odd?",           prim_oddp},
+    {"quotient",       prim_quotient},
+    {"remainder",      prim_remainder},
+    {"modulo",         prim_modulo},
+    {"gcd",            prim_gcd},
+    {"lcm",            prim_lcm},
+    {"abs",            prim_abs},
+    {"max",            prim_max},
+    {"min",            prim_min},
+    {"floor",          prim_floor},
+    {"ceiling",        prim_ceiling},
+    {"truncate",       prim_truncate},
+    {"round",          prim_round},
+    {"number->string", prim_number_to_string},
+    {"string->number", prim_string_to_number},
+    {"exact->inexact", prim_exact_to_inexact},
+    {"inexact->exact", prim_inexact_to_exact},
+    {"finite?",        prim_finitep},
+    {"infinite?",      prim_infinitep},
+    {"nan?",           prim_nanp},
+    {"sin",            prim_sin},
+    {"cos",            prim_cos},
+    {"tan",            prim_tan},
+    {"asin",           prim_asin},
+    {"acos",           prim_acos},
+    {"atan",           prim_atan},
+    {"sqrt",           prim_sqrt},
+    {"exp",            prim_exp},
+    {"log",            prim_log},
+    {"find-global-slot",   prim_find_global_slot},
+    {"create-global-slot", prim_create_global_slot},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 

@@ -85,7 +85,7 @@ static int64_t bignum_to_int64(word b, int* ok) {
 }
 
 // If bignum fits in fixnum, return fixnum; else return bignum as-is
-static word bignum_to_fixnum_or_box(word b) {
+word bignum_to_fixnum_or_box(word b) {
     int ok;
     int64_t val = bignum_to_int64(b, &ok);
     // Only unbox if value fits in 62-bit fixnum range
@@ -470,7 +470,7 @@ static word bignum_divmod(vm_state_t* vm, word a, word b, word* mod_out) {
 }
 
 // Convert string to bignum
-static word bignum_from_string(vm_state_t* vm, const char* s, int radix) {
+word bignum_from_string(vm_state_t* vm, const char* s, int radix) {
     while (*s == ' ' || *s == '\t' || *s == '\n') s++;
     int sign = 0;
     if (*s == '-') { sign = 1; s++; }
@@ -495,7 +495,7 @@ static word bignum_from_string(vm_state_t* vm, const char* s, int radix) {
 }
 
 // Convert bignum to malloc'd string -- caller must free
-static char* bignum_to_string(vm_state_t* vm, word b, int radix) {
+char* bignum_to_string(vm_state_t* vm, word b, int radix) {
     word* hdr = ptr_from_word(b);
     size_t nc = bignum_count(hdr);
     if (nc == 0) {
@@ -922,7 +922,7 @@ word prim_oddp(vm_state_t* vm, int nargs) {
 // Integer operations
 // ============================================================
 
-word prim_quotient_bn(vm_state_t* vm, int nargs) {
+word prim_quotient(vm_state_t* vm, int nargs) {
     if (nargs != 2) { vm->error_code = 1; return word_nil(); }
     word a = promote_to_bignum(vm, vm->sp[0]);
     word b = promote_to_bignum(vm, vm->sp[1]);
@@ -932,7 +932,7 @@ word prim_quotient_bn(vm_state_t* vm, int nargs) {
     return bignum_to_fixnum_or_box(q);
 }
 
-word prim_remainder_bn(vm_state_t* vm, int nargs) {
+word prim_remainder(vm_state_t* vm, int nargs) {
     if (nargs != 2) { vm->error_code = 1; return word_nil(); }
     word a = promote_to_bignum(vm, vm->sp[0]);
     word b = promote_to_bignum(vm, vm->sp[1]);
