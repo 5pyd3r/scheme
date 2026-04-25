@@ -30,8 +30,10 @@ word prim_string(vm_state_t* vm, int nargs) {
     word* str = vm->gc->alloc_words(nwords);
     obj_set_type(str, OBJ_TYPE_STRING);
     str[DATA_START_INDEX] = (word)(int64_t)nargs;
-    for (int i = 0; i < nargs; i++)
+    for (int i = 0; i < nargs; i++) {
+        if (!is_char(vm->sp[i])) { vm->error_code = 1; return word_nil(); }
         string_set(str, i, vm->sp[i]);
+    }
     return ptr_to_word(str);
 }
 
@@ -140,6 +142,7 @@ word prim_list_to_string(vm_state_t* vm, int nargs) {
     cur = lst;
     for (size_t i = 0; i < count; i++) {
         word* p = ptr_from_word(cur);
+        if (!is_char(pair_car(p))) { vm->error_code = 1; return word_nil(); }
         string_set(str, i, pair_car(p));
         cur = pair_cdr(p);
     }
