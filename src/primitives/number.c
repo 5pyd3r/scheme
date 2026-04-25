@@ -1,7 +1,5 @@
 #include "prim.h"
 #include <string.h>
-#include <math.h>
-#include <stdlib.h>
 
 // ============================================================
 // Bignum representation
@@ -159,8 +157,7 @@ static word bignum_add(vm_state_t* vm, word a, word b) {
     } else {
         int cmp = bignum_cmp_abs(a, b);
         if (cmp == 0) {
-            word* hz = ptr_from_word(make_bignum(vm, 0, 0));
-            return ptr_to_word(hz);
+            return word_from_fixnum(0);
         }
         word* big = ptr_from_word(cmp > 0 ? a : b);
         word* small = ptr_from_word(cmp > 0 ? b : a);
@@ -186,6 +183,7 @@ static word bignum_add(vm_state_t* vm, word a, word b) {
 static word bignum_sub(vm_state_t* vm, word a, word b) {
     word* hb = ptr_from_word(b);
     size_t nb = bignum_count(hb);
+    if (nb == 0) return a;  // a - 0 = a
     word* hneg = ptr_from_word(make_bignum(vm, !bignum_sign(hb) ? 1 : 0, nb));
     memcpy(bignum_limbs(hneg), bignum_limbs(hb), nb * sizeof(uint32_t));
     return bignum_add(vm, a, ptr_to_word(hneg));
@@ -299,7 +297,9 @@ word prim_div(vm_state_t* vm, int nargs) {
     for (int i = 1; i < nargs; i++) {
         w = vm->sp[i];
         if (!is_fixnum(w)) { vm->error_code = 1; return word_nil(); }
-        result /= word_to_fixnum(w);
+        int64_t divisor = word_to_fixnum(w);
+        if (divisor == 0) { vm->error_code = 1; return word_nil(); }
+        result /= divisor;
     }
     return word_from_fixnum(result);
 }
