@@ -1,5 +1,4 @@
 #include "prim.h"
-#include <stdio.h>
 
 word prim_add(vm_state_t* vm, int nargs) {
     int64_t sum = 0;

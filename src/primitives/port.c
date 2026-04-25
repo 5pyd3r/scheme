@@ -40,6 +40,7 @@ word prim_display(vm_state_t* vm, int nargs) {
 }
 
 word prim_newline(vm_state_t* vm, int nargs) {
+    (void)vm;
     (void)nargs;
     putchar('\n');
     fflush(stdout);
