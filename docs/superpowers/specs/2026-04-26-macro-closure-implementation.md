@@ -18,11 +18,11 @@
 
 The compile pipeline gains an `env` parameter: an alist `((sym . slot) ...)` representing bindings from enclosing lambda scopes.
 
-Slot numbering matches VM frame layout:
-- `fp[1]` = param 1 (LREF slot 1)
-- `fp[n]` = param n (LREF slot n)
-- `fp[n+1]` = first captured var (LREF slot n+1)
-- `fp[n+k]` = last captured var (LREF slot n+k)
+Slot numbering matches VM frame layout (captured vars first):
+- `fp[1]` = first captured var (LREF slot 1)
+- `fp[nfree]` = last captured var (LREF slot nfree)
+- `fp[nfree+1]` = first param (LREF slot nfree+1)
+- `fp[nfree+n]` = last param (LREF slot nfree+n)
 
 **Files changed:** `src/bootstrap/compiler.c`
 
@@ -44,7 +44,7 @@ compile_lambda(buf, vm, args, body, parent_env):
     if symbol in parent_env and NOT in params and NOT primitive:
       add to captured (deduplicate)
   
-  assign slots: captured[0] → |params|+1, captured[1] → |params|+2, ...
+  assign slots: captured[0] → 1, captured[1] → 2, ...
   
   // Emit LREF for each captured var (pushes onto stack)
   for each cv in captured (in order):
@@ -61,8 +61,8 @@ compile_lambda(buf, vm, args, body, parent_env):
 ### 1.3 Symbol Dispatch Change
 
 In symbol compilation, three-way check:
-1. In local params → `OP_LREF slot` (slot 1..|params|)
-2. In env → `OP_LREF slot` (captured var, slot |params|+1..)
+1. In local params → `OP_LREF slot` (slot nfree+1..nfree+|params|)
+2. In env → `OP_LREF slot` (captured var, slot 1..nfree)
 3. Neither → `OP_GREF` (global lookup)
 
 ### 1.4 Primitive Detection
