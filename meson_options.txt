@@ -1,0 +1,2 @@
+option('gc_impl', type: 'string', value: 'marksweep', description: 'GC implementation')
+option('build_type', type: 'string', value: 'release', description: 'Build type: debug or release')
