@@ -55,3 +55,11 @@ test_bytevector = executable('test_bytevector',
   link_args: ['-lm'],
 )
 test('bytevector', test_bytevector)
+
+test_closure = executable('test_closure',
+  'test_closure.c',
+  include_directories: test_scheme_inc,
+  link_with: scheme_core,
+  link_args: ['-lm'],
+)
+test('closure', test_closure)
