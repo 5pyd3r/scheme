@@ -92,7 +92,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
             // Parse as flonum
             char buf[128];
             int len = end - start;
-            if (len >= 127) { vm->error_code = 1; return word_nil(); }
+            if (len >= 127) { vm->error_kind = 1; return word_nil(); }
             memcpy(buf, s + start, (size_t)len);
             buf[len] = '\0';
             *pos = end;
@@ -102,7 +102,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
             // Parse as integer (fixnum or bignum)
             char buf[64];
             int len = end - start;
-            if (len >= 63) { vm->error_code = 1; return word_nil(); }
+            if (len >= 63) { vm->error_kind = 1; return word_nil(); }
             memcpy(buf, s + start, (size_t)len);
             buf[len] = '\0';
             *pos = end;

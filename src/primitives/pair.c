@@ -85,6 +85,6 @@ static bool equal_rec(vm_state_t* vm, word a, word b) {
 }
 
 word prim_equal(vm_state_t* vm, int nargs) {
-    if (nargs != 2) { vm->error_code = 1; return word_nil(); }
+    if (nargs != 2) { vm->error_kind = 1; return word_nil(); }
     return equal_rec(vm, vm->sp[0], vm->sp[1]) ? word_true() : word_false();
 }

@@ -2,7 +2,7 @@
 #include <string.h>
 
 word prim_symbol_to_string(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_nil(); }
+    if (nargs != 1) { vm->error_kind = 1; return word_nil(); }
     word sym = vm->sp[0];
     if (!is_ptr(sym)) return word_nil();
     word* hdr = ptr_from_word(sym);
@@ -18,7 +18,7 @@ word prim_symbol_to_string(vm_state_t* vm, int nargs) {
 }
 
 word prim_prim_index(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_false(); }
+    if (nargs != 1) { vm->error_kind = 1; return word_false(); }
     word sym = vm->sp[0];
     if (!is_ptr(sym)) return word_false();
     word* hdr = ptr_from_word(sym);

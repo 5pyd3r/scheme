@@ -303,7 +303,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             cur = pair_cdr(ptr_from_word(cur));
         }
         if (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
-            vm->error_code = 1;
+            vm->error_kind = 1;
             return;
         }
 

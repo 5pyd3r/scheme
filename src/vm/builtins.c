@@ -107,7 +107,7 @@ word prim_bytevector_to_u8_list(vm_state_t* vm, int nargs);
 word prim_u8_list_to_bytevector(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
+    if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
     word pair = vm->sp[0];
     if (!is_ptr(pair) || obj_type(ptr_from_word(pair)) != OBJ_TYPE_PAIR)
         return word_from_fixnum(-1);
@@ -151,18 +151,18 @@ word prim_assemble_code(vm_state_t* vm, int nargs) {
 }
 
 word prim_fixnum_pred(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_nil(); }
+    if (nargs != 1) { vm->error_kind = 1; return word_nil(); }
     return is_fixnum(vm->sp[0]) ? word_true() : word_false();
 }
 
 word prim_symbol_pred(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_nil(); }
+    if (nargs != 1) { vm->error_kind = 1; return word_nil(); }
     word w = vm->sp[0];
     return (is_ptr(w) && obj_type(ptr_from_word(w)) == OBJ_TYPE_SYMBOL) ? word_true() : word_false();
 }
 
 word prim_find_global_slot(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
+    if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
     word sym = vm->sp[0];
     int slot = vm_find_global_slot(vm, sym);
     if (slot < 0) {
@@ -180,7 +180,7 @@ word prim_find_global_slot(vm_state_t* vm, int nargs) {
 }
 
 word prim_create_global_slot(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_from_fixnum(-1); }
+    if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
     word sym = vm->sp[0];
     if (vm->next_global_slot >= (int)vm->global_count) {
         size_t new_count = vm->global_count * 2;
