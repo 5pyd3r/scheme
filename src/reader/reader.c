@@ -1,4 +1,5 @@
 #include "reader.h"
+#include "debug.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -81,7 +82,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
         return ptr_to_word(sym);
     }
 
-    vm->error_code = 1;
+    VM_ERROR(vm, ERR_READ, "unrecognized token", word_from_char((unsigned char)s[*pos]));
     return word_nil();
 }
 
@@ -94,7 +95,7 @@ static word read_list_tail(vm_state_t* vm, const char* s, int* pos) {
     }
 
     word car = read_expr(vm, s, pos);
-    if (vm->error_code) return word_nil();
+    if (vm->error_kind != ERR_NONE) return word_nil();
     skip_ws(s, pos);
 
     word cdr;
