@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+typedef struct vm_state vm_state_t;
+
 #ifdef SCHEME_DEBUG
 
 // ---- Assertion ----
