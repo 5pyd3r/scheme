@@ -1,4 +1,5 @@
 #include "gc.h"
+#include "debug.h"
 #include "pal.h"
 #include <string.h>
 
@@ -40,6 +41,7 @@ static word* gc_alloc_words(size_t nwords) {
         // Retry after collection
         gc_collect();
         block = (word*)pal->mmap_alloc(nwords * sizeof(word));
+        DASSERT(block != NULL, "OOM: gc_alloc_words(%zu) failed after collection", nwords);
         if (!block) return NULL;
     }
 
@@ -91,6 +93,9 @@ static void mark_word(word w) {
             mark_word(consts[i]);
         break;
     }
+    default:
+        DASSERT(false, "mark_word: unknown object type %ld", (long)obj_type(hdr));
+        break;
     }
 }
 
