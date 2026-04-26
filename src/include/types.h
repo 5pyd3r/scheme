@@ -96,6 +96,18 @@ enum {
 #define obj_type(hdr)        ((hdr)[TYPE_WORD_INDEX])
 #define obj_set_type(hdr, t) ((hdr)[TYPE_WORD_INDEX] = (word)(t))
 
+// ---- Error kinds ----
+typedef enum {
+    ERR_NONE = 0,
+    ERR_READ,
+    ERR_TYPE,
+    ERR_UNBOUND,
+    ERR_ARITY,
+    ERR_INTERNAL,
+    ERR_IO,
+    ERR_GC,
+} vm_error_kind_t;
+
 // ---- Pair helpers ----
 #define pair_car(hdr)   ((hdr)[DATA_START_INDEX])
 #define pair_cdr(hdr)   ((hdr)[DATA_START_INDEX + 1])

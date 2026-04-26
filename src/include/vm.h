@@ -30,8 +30,9 @@ typedef struct vm_state {
 
     word*   primitives;
 
-    int     error_code;
-    word    error_arg;
+    vm_error_kind_t error_kind;
+    const char*     error_msg;
+    word            error_arg;
 
     bool    gc_active;
 } vm_state_t;
