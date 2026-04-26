@@ -1,4 +1,5 @@
 #include "compiler.h"
+#include "debug.h"
 #include "prim.h"
 #include "vm/opcodes.h"
 #include <stdio.h>
@@ -38,6 +39,7 @@ static bool is_symbol(word w, const char* name) {
 static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, int* next_local);
 
 static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, int* next_local) {
+    DASSERT_TYPE(expr, OBJ_TYPE_PAIR);
     word* hdr = ptr_from_word(expr);
     word fn = pair_car(hdr);
     word args = pair_cdr(hdr);
