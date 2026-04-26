@@ -145,10 +145,46 @@ static void collect_free_vars_inner(vm_state_t* vm, word expr, word params, word
 
     if (type == OBJ_TYPE_PAIR) {
         word head = pair_car(hdr);
-        // Skip walking into inner lambda bodies (new scope)
+        // Handle inner lambda/let: extract inner params, only walk body
         if (is_ptr(head) && obj_type(ptr_from_word(head)) == OBJ_TYPE_SYMBOL) {
             if (is_symbol(head, "lambda") || is_symbol(head, "let")) {
-                collect_free_vars_inner(vm, pair_cdr(hdr), params, env, collected);
+                word rest = pair_cdr(hdr);  // ((params) body ...)
+                if (!is_ptr(rest) || obj_type(ptr_from_word(rest)) != OBJ_TYPE_PAIR) return;
+                word* rhdr = ptr_from_word(rest);
+                word inner_formals = pair_car(rhdr);
+                word body_pair = pair_cdr(rhdr);  // (body ...) — we walk this list
+
+                // Build merged params list (inner params + outer params)
+                word merged = params;
+                if (is_symbol(head, "lambda")) {
+                    // inner_formals is a list of symbols
+                    word pcur = inner_formals;
+                    while (is_ptr(pcur) && obj_type(ptr_from_word(pcur)) == OBJ_TYPE_PAIR) {
+                        word* ph = ptr_from_word(pcur);
+                        word* pp = vm->gc->alloc_words(4);
+                        obj_set_type(pp, OBJ_TYPE_PAIR);
+                        pair_car(pp) = pair_car(ph); pair_cdr(pp) = merged;
+                        merged = ptr_to_word(pp);
+                        pcur = pair_cdr(ph);
+                    }
+                } else {
+                    // let: extract param names from ((param val) ...)
+                    word bcur = inner_formals;
+                    while (is_ptr(bcur) && obj_type(ptr_from_word(bcur)) == OBJ_TYPE_PAIR) {
+                        word* bh = ptr_from_word(bcur);
+                        word binding = pair_car(bh);
+                        if (is_ptr(binding) && obj_type(ptr_from_word(binding)) == OBJ_TYPE_PAIR) {
+                            word* bih = ptr_from_word(binding);
+                            word* pp = vm->gc->alloc_words(4);
+                            obj_set_type(pp, OBJ_TYPE_PAIR);
+                            pair_car(pp) = pair_car(bih); pair_cdr(pp) = merged;
+                            merged = ptr_to_word(pp);
+                        }
+                        bcur = pair_cdr(bh);
+                    }
+                }
+                // Walk only body with merged params filter
+                collect_free_vars_inner(vm, body_pair, merged, env, collected);
                 return;
             }
         }
