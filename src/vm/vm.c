@@ -266,8 +266,17 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             word* clo = vm->gc->alloc_words(5);
             obj_set_type(clo, OBJ_TYPE_CLOSURE);
             closure_code(clo) = ptr_to_word(vm->code_objects[code_idx]);
-            closure_env(clo) = (word)(uintptr_t)vm->env;
-            clo[DATA_START_INDEX + 2] = nfree;
+            if (nfree > 0) {
+                word* env_vec = vm->gc->alloc_words(3 + nfree);
+                obj_set_type(env_vec, OBJ_TYPE_VECTOR);
+                env_vec[DATA_START_INDEX] = (word)nfree;
+                for (int i = nfree - 1; i >= 0; i--)
+                    env_vec[DATA_START_INDEX + 1 + i] = *vm->sp--;
+                closure_env(clo) = ptr_to_word(env_vec);
+            } else {
+                closure_env(clo) = 0;
+            }
+            clo[DATA_START_INDEX + 2] = (word)nfree;
             *++vm->sp = ptr_to_word(clo);
             break;
         }
@@ -276,14 +285,15 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             uint8_t nargs = read_u8(&vm->ip);
             // Args compiled first, then closure on top: sp[-nargs+1..0] = args, sp[0] = closure
             word* clo = ptr_from_word(*vm->sp);
+            uint8_t nfree = (uint8_t)(clo[DATA_START_INDEX + 2]);
             word* base = vm->sp - nargs;  // base[0..nargs-1] = args
 
             // Save caller sp (restore to before first arg, so frame header is overwritten)
             word old_sp = (word)(uintptr_t)(base - 1);
 
-            // Shift args (base[0..nargs-1]) to base[4..nargs+3]
+            // Shift args (base[0..nargs-1]) to base[4+nfree..nargs+4+nfree-1]
             for (int i = nargs - 1; i >= 0; i--)
-                base[i + 4] = base[i];
+                base[i + 4 + nfree] = base[i];
 
             // Save frame header (4 words) — base[0..3]
             base[0] = old_sp;
@@ -291,10 +301,17 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             base[2] = (word)(uintptr_t)vm->env;  // saved_env
             base[3] = (word)(uintptr_t)vm->fp;   // saved_fp
 
+            // Unpack captured vars into base[4..4+nfree-1]
+            if (nfree > 0) {
+                word* env_vec = ptr_from_word(closure_env(clo));
+                for (int i = 0; i < nfree; i++)
+                    base[4 + i] = env_vec[DATA_START_INDEX + 1 + i];
+            }
+
             // Set new frame
-            vm->fp = base + 3;  // fp[0]=saved_fp, fp[1]=arg1
+            vm->fp = base + 3;  // fp[0]=saved_fp, fp[1]=first captured var (if nfree>0), fp[1+nfree]=arg1
             vm->env = (word*)(uintptr_t)closure_env(clo);
-            vm->sp = base + nargs + 4;  // point past last arg
+            vm->sp = base + 4 + nargs + nfree;  // point past last arg
 
             vm->current_code = ptr_from_word(closure_code(clo));
             vm->ip = code_bytes(vm->current_code);
@@ -317,13 +334,21 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             uint8_t nargs = read_u8(&vm->ip);
             // closure at sp[0], args at sp[-nargs..-1]
             word* clo = ptr_from_word(*vm->sp);
+            uint8_t nfree = (uint8_t)(clo[DATA_START_INDEX + 2]);
 
             // Copy args from stack into current frame's fp[1..nargs]
             for (int i = 0; i < nargs; i++)
                 vm->fp[1 + i] = vm->sp[i - nargs];
 
+            // Unpack captured vars into fp[1+nargs..1+nargs+nfree-1]
+            if (nfree > 0) {
+                word* env_vec = ptr_from_word(closure_env(clo));
+                for (int i = 0; i < nfree; i++)
+                    vm->fp[1 + nargs + i] = env_vec[DATA_START_INDEX + 1 + i];
+            }
+
             // Reset sp, jump to new closure code
-            vm->sp = vm->fp + nargs;
+            vm->sp = vm->fp + nargs + nfree;
             vm->env = (word*)(uintptr_t)closure_env(clo);
             vm->current_code = ptr_from_word(closure_code(clo));
             vm->ip = code_bytes(vm->current_code);
