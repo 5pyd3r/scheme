@@ -229,11 +229,11 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
 static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env);
 
 static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, word env) {
-    (void)env;  // free variables not yet supported in stage0
     local_scope_t lambda_scope = {0};
-    // Fill parameters
+    // Extract params, building both scope names and a Scheme list
     int param_idx = 0;
     word cur = args;
+    word param_list = word_nil();  // reversed list of param symbols
     while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR && param_idx < MAX_LOCALS) {
         word param_sym = pair_car(ptr_from_word(cur));
         word* shdr = ptr_from_word(param_sym);
@@ -243,13 +243,69 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
             pname[i] = (char)word_to_char(string_ref(shdr, i));
         pname[plen] = '\0';
         lambda_scope.names[param_idx++] = pname;
+        // Build param_list (reversed — will be reversed back in collect_free_vars)
+        word* pp = vm->gc->alloc_words(4); obj_set_type(pp, OBJ_TYPE_PAIR);
+        pair_car(pp) = param_sym; pair_cdr(pp) = param_list;
+        param_list = ptr_to_word(pp);
         cur = pair_cdr(ptr_from_word(cur));
     }
     lambda_scope.count = param_idx;
 
-    // Compile body to child code buffer
+    // Detect free variables (symbols in body that are in env, not params, not primitives)
+    word captured = collect_free_vars(vm, body, param_list, env, param_idx);
+
+    // Count captured vars
+    int nfree = 0;
+    cur = captured;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        nfree++;
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+
+    // Build child env: params first (they shadow captured), then captured
+    // Param slots: nfree+1 .. nfree+param_idx  (fp[nfree+1..nfree+n] = params)
+    word child_env = captured;
+    {
+        int slot = nfree + param_idx;  // params in forward source order at highest slots
+        cur = param_list;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            word* ph = ptr_from_word(cur);
+            word* entry = vm->gc->alloc_words(4); obj_set_type(entry, OBJ_TYPE_PAIR);
+            pair_car(entry) = pair_car(ph); pair_cdr(entry) = word_from_fixnum(slot);
+            word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+            pair_car(bp) = ptr_to_word(entry); pair_cdr(bp) = child_env;
+            child_env = ptr_to_word(bp);
+            slot--; cur = pair_cdr(ph);
+        }
+    }
+
+    // Emit LREF for each captured var (pushes parent-frame values onto stack, becomes fp[1..nfree])
+    {
+        // captured is in source order, slots are 1..nfree
+        // Reverse to get correct emission order (slot 1 first)
+        word rev = word_nil();
+        cur = captured;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            word* hdr = ptr_from_word(cur);
+            word* pp = vm->gc->alloc_words(4); obj_set_type(pp, OBJ_TYPE_PAIR);
+            pair_car(pp) = pair_cdr(ptr_from_word(pair_car(hdr)));  // slot (fixnum)
+            pair_cdr(pp) = rev;
+            rev = ptr_to_word(pp);
+            cur = pair_cdr(hdr);
+        }
+        cur = rev;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            word* hdr = ptr_from_word(cur);
+            int slot = (int)word_to_fixnum(pair_car(hdr));
+            emit_byte(buf, OP_LREF);
+            emit_byte(buf, (uint8_t)slot);
+            cur = pair_cdr(hdr);
+        }
+    }
+
+    // Compile body to child code buffer with child_env
     code_buf_t child_buf = {0};
-    compile_expr_to_buf(&child_buf, vm, body, &lambda_scope, env);
+    compile_expr_to_buf(&child_buf, vm, body, &lambda_scope, child_env);
     emit_byte(&child_buf, OP_RETURN);
 
     // Create child code object
@@ -265,9 +321,7 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
     // Register child code object with VM
     int code_idx = vm_load_code(vm, child_code);
     if (code_idx < 0) {
-        // Failed to register - push nil as fallback
         emit_byte(buf, OP_PUSH_NIL);
-        // Clean up param names
         for (int i = 0; i < param_idx; i++) free((void*)lambda_scope.names[i]);
         return;
     }
@@ -276,7 +330,7 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
     emit_byte(buf, OP_CLOSE);
     emit_byte(buf, (uint8_t)(code_idx & 0xFF));
     emit_byte(buf, (uint8_t)((code_idx >> 8) & 0xFF));
-    emit_byte(buf, 0);  // nfree = 0 for stage0
+    emit_byte(buf, (uint8_t)nfree);
 
     // Clean up param names
     for (int i = 0; i < param_idx; i++) free((void*)lambda_scope.names[i]);
@@ -609,7 +663,6 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
 }
 
 static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env) {
-    (void)env;
     if (is_fixnum(expr)) {
         int32_t val = (int32_t)word_to_fixnum(expr);
         emit_byte(buf, OP_PUSH_INT);
@@ -629,6 +682,16 @@ static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, loca
     }
 
     if (is_ptr(expr) && obj_type(ptr_from_word(expr)) == OBJ_TYPE_SYMBOL) {
+        // Check env first (has correct frame-aware slots for both captured
+        // vars and params when nfree > 0)
+        if (!is_nil(env)) {
+            int env_slot = env_find(env, expr);
+            if (env_slot > 0) {
+                emit_byte(buf, OP_LREF);
+                emit_byte(buf, (uint8_t)env_slot);
+                return;
+            }
+        }
         if (scope) {
             int local_idx = local_find(scope, expr);
             if (local_idx > 0) {
