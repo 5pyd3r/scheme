@@ -62,6 +62,132 @@ static int local_find(local_scope_t* scope, word sym) {
     return -1;
 }
 
+// env alist: ((sym . slot) ...). Returns slot (>=1) or -1.
+static int env_find(word env, word sym) {
+    word cur = env;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* hdr = ptr_from_word(cur);
+        word entry = pair_car(hdr);
+        if (is_ptr(entry) && obj_type(ptr_from_word(entry)) == OBJ_TYPE_PAIR) {
+            word* eh = ptr_from_word(entry);
+            word entry_sym = pair_car(eh);
+            if (is_ptr(entry_sym) && is_ptr(sym) &&
+                obj_type(ptr_from_word(entry_sym)) == OBJ_TYPE_SYMBOL &&
+                obj_type(ptr_from_word(sym)) == OBJ_TYPE_SYMBOL) {
+                word* s1 = ptr_from_word(entry_sym);
+                word* s2 = ptr_from_word(sym);
+                int l1 = (int)string_length(s1);
+                int l2 = (int)string_length(s2);
+                if (l1 == l2) {
+                    int match = 1;
+                    for (int i = 0; i < l1; i++)
+                        if (string_ref(s1, i) != string_ref(s2, i)) { match = 0; break; }
+                    if (match) {
+                        word sw = pair_cdr(eh);
+                        if (is_fixnum(sw)) return (int)word_to_fixnum(sw);
+                    }
+                }
+            }
+        }
+        cur = pair_cdr(hdr);
+    }
+    return -1;
+}
+
+// Returns true if sym is eq?-equivalent to any symbol in the list
+static bool sym_in_list(word sym, word list) {
+    word cur = list;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word item = pair_car(ptr_from_word(cur));
+        if (is_ptr(item) && is_ptr(sym) &&
+            obj_type(ptr_from_word(item)) == OBJ_TYPE_SYMBOL &&
+            obj_type(ptr_from_word(sym)) == OBJ_TYPE_SYMBOL) {
+            word* s1 = ptr_from_word(item);
+            word* s2 = ptr_from_word(sym);
+            int l1 = (int)string_length(s1), l2 = (int)string_length(s2);
+            if (l1 == l2) {
+                int match = 1;
+                for (int i = 0; i < l1; i++)
+                    if (string_ref(s1, i) != string_ref(s2, i)) { match = 0; break; }
+                if (match) return true;
+            }
+        }
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    return false;
+}
+
+// Recursively collects free symbols from expr. Skips params, primitives, duplicates.
+// collected is a reversed list of symbols (built with cons).
+static void collect_free_vars_inner(vm_state_t* vm, word expr, word params, word env, word* collected) {
+    if (is_fixnum(expr) || is_char(expr) || is_nil(expr) || is_true(expr) || is_false(expr))
+        return;
+    if (!is_ptr(expr)) return;
+    word* hdr = ptr_from_word(expr);
+    int type = obj_type(hdr);
+
+    if (type == OBJ_TYPE_SYMBOL) {
+        if (sym_in_list(expr, params)) return;
+        if (sym_in_list(expr, *collected)) return;
+        char name[64]; int nlen = (int)string_length(hdr);
+        if (nlen < 63) {
+            for (int i = 0; i < nlen; i++) name[i] = (char)word_to_char(string_ref(hdr, i));
+            name[nlen] = '\0';
+            if (prim_lookup(name) >= 0) return;
+        }
+        if (env_find(env, expr) < 0) return;
+        word* pp = vm->gc->alloc_words(4);
+        obj_set_type(pp, OBJ_TYPE_PAIR);
+        pair_car(pp) = expr; pair_cdr(pp) = *collected;
+        *collected = ptr_to_word(pp);
+        return;
+    }
+
+    if (type == OBJ_TYPE_PAIR) {
+        word head = pair_car(hdr);
+        // Skip walking into inner lambda bodies (new scope)
+        if (is_ptr(head) && obj_type(ptr_from_word(head)) == OBJ_TYPE_SYMBOL) {
+            if (is_symbol(head, "lambda") || is_symbol(head, "let")) {
+                collect_free_vars_inner(vm, pair_cdr(hdr), params, env, collected);
+                return;
+            }
+        }
+        collect_free_vars_inner(vm, head, params, env, collected);
+        collect_free_vars_inner(vm, pair_cdr(hdr), params, env, collected);
+    }
+}
+
+// Returns alist of (sym . captured_slot) for each free variable found, slots start at 1 (VM: fp[1..nfree]=captured)
+static word collect_free_vars(vm_state_t* vm, word body, word params, word env, int nparams) {
+    (void)nparams;
+    word collected = word_nil();
+    collect_free_vars_inner(vm, body, params, env, &collected);
+    // collected is reversed source-order list. Reverse to get source-order.
+    word ordered = word_nil();
+    word cur = collected;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* hdr = ptr_from_word(cur);
+        word* pp = vm->gc->alloc_words(4); obj_set_type(pp, OBJ_TYPE_PAIR);
+        pair_car(pp) = pair_car(hdr); pair_cdr(pp) = ordered;
+        ordered = ptr_to_word(pp);
+        cur = pair_cdr(hdr);
+    }
+    // Build bindings alist with slots 1..nfree (captured vars go first in frame)
+    int slot = 1;
+    word bindings = word_nil();
+    cur = ordered;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* hdr = ptr_from_word(cur);
+        word* entry = vm->gc->alloc_words(4); obj_set_type(entry, OBJ_TYPE_PAIR);
+        pair_car(entry) = pair_car(hdr); pair_cdr(entry) = word_from_fixnum(slot);
+        word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+        pair_car(bp) = ptr_to_word(entry); pair_cdr(bp) = bindings;
+        bindings = ptr_to_word(bp);
+        slot++; cur = pair_cdr(hdr);
+    }
+    return bindings;
+}
+
 static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, local_scope_t* parent_scope);
 
 static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope);
@@ -303,7 +429,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             cur = pair_cdr(ptr_from_word(cur));
         }
         if (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
-            vm->error_code = 1;
+            vm->error_kind = ERR_INTERNAL;
             return;
         }
 
