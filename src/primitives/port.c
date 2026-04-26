@@ -1,8 +1,9 @@
 #include "prim.h"
+#include "debug.h"
 #include <stdio.h>
 
 word prim_display(vm_state_t* vm, int nargs) {
-    if (nargs != 1) { vm->error_code = 1; return word_nil(); }
+    if (nargs != 1) { VM_ERROR(vm, ERR_ARITY, "display: expected 1 argument", word_nil()); return word_nil(); }
     word w = vm->sp[0];
     if (is_fixnum(w)) {
         printf("%lld", (long long)word_to_fixnum(w));
