@@ -8,7 +8,7 @@ project('scheme', 'c',
 build_type = get_option('build_type')
 
 if build_type == 'debug'
-  add_project_arguments('-O0', '-g3', '-ggdb', language: 'c')
+  add_project_arguments('-O0', '-g3', '-ggdb3', language: 'c')
   add_project_arguments('-fsanitize=address,undefined', language: 'c')
   add_project_link_arguments('-fsanitize=address,undefined', language: 'c')
   add_project_arguments('-fno-omit-frame-pointer', language: 'c')
