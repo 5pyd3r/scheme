@@ -2,6 +2,7 @@
 #include "pal.h"
 #include "gc.h"
 #include "vm.h"
+#include "debug.h"
 #include "reader.h"
 #include "compiler.h"
 #include "prim.h"
@@ -29,9 +30,10 @@ static void repl(void) {
 
         int pos = 0;
         word expr = read_sexp(vm, buf, &pos);
-        if (vm->error_code) {
-            vm->error_code = 0;
-            printf("read error\n");
+        if (vm->error_kind != ERR_NONE) {
+            fprintf(stderr, "Error: [%d] %s\n", (int)vm->error_kind,
+                    vm->error_msg ? vm->error_msg : "unknown");
+            vm->error_kind = ERR_NONE;
             continue;
         }
         if (is_eof(expr)) break;
@@ -39,7 +41,7 @@ static void repl(void) {
         word code_obj = compile_expr(vm, expr);
         int code_idx = vm_load_code(vm, ptr_from_word(code_obj));
 
-        vm->error_code = 0;
+        vm->error_kind = ERR_NONE;
         word result = vm_execute(vm, code_idx);
 
         vm->sp[0] = result;
@@ -67,9 +69,11 @@ static int exec_file(const char* path) {
     int pos = 0;
     while (pos < n) {
         word expr = read_sexp(vm, buf, &pos);
-        if (vm->error_code) {
-            vm->error_code = 0;
-            fprintf(stderr, "read error at position %d\n", pos);
+        if (vm->error_kind != ERR_NONE) {
+            fprintf(stderr, "Error at position %d: [%d] %s\n", pos,
+                    (int)vm->error_kind,
+                    vm->error_msg ? vm->error_msg : "unknown");
+            vm->error_kind = ERR_NONE;
             break;
         }
         if (is_eof(expr)) break;
@@ -87,6 +91,7 @@ int main(int argc, char** argv) {
     gc = gc_init();
     vm = vm_init(gc, pal);
     prim_init_all(vm);
+    debug_install_handlers(vm);
 
     if (argc > 1) {
         return exec_file(argv[1]);
