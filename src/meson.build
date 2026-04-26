@@ -5,6 +5,7 @@ scheme_core_sources = files(
   'vm/builtins.c',
   'reader/reader.c',
   'bootstrap/compiler.c',
+  'debug.c',
   'primitives/arith.c',
   'primitives/pair.c',
   'primitives/port.c',
