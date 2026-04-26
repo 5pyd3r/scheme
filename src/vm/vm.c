@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "debug.h"
 #include "opcodes.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,12 +143,14 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
         }
 
         case OP_CAR: {
+            DASSERT_TYPE(*vm->sp, OBJ_TYPE_PAIR);
             word* pair = ptr_from_word(*vm->sp);
             *vm->sp = pair_car(pair);
             break;
         }
 
         case OP_CDR: {
+            DASSERT_TYPE(*vm->sp, OBJ_TYPE_PAIR);
             word* pair = ptr_from_word(*vm->sp);
             *vm->sp = pair_cdr(pair);
             break;
@@ -194,8 +197,9 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             return *vm->sp;
 
         default:
-            fprintf(stderr, "unknown opcode: 0x%02x\n", op);
-            vm->error_code = 1;
+            DASSERT(false, "unknown opcode: 0x%02x at IP offset %ld",
+                    op, (long)(vm->ip - 1 - (uint8_t*)(vm->current_code + 3)));
+            VM_ERROR(vm, ERR_INTERNAL, "unknown opcode", word_from_fixnum(op));
             return word_nil();
         }
     }
