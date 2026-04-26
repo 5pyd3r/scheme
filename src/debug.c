@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "debug.h"
 #include "vm.h"
 #include <signal.h>
@@ -140,11 +141,8 @@ static void dump_vm_state(void) {
         if (crash_vm->error_msg) {
             safe_write(crash_vm->error_msg);
         }
-        safe_write("\"");
-        if (crash_vm->error_kind != ERR_NONE) {
-            safe_write(" arg=");
-            safe_write_word(crash_vm->error_arg);
-        }
+        safe_write("\" arg=");
+        safe_write_word(crash_vm->error_arg);
         safe_write("\n");
     }
 }
@@ -181,7 +179,6 @@ static void print_backtrace(void) {
 
 // ---- Backtrace via _Unwind_Backtrace (bionic/Android) ----
 #elif defined(__ANDROID__) || defined(__BIONIC__)
-#define _GNU_SOURCE
 #include <unwind.h>
 
 struct bt_state {
