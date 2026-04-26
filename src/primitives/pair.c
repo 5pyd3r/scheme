@@ -56,3 +56,35 @@ word prim_set_cdr(vm_state_t* vm, int nargs) {
     pair_cdr(pair) = vm->sp[1];
     return word_nil();
 }
+
+/* equal? -- structural recursive comparison */
+static bool equal_rec(vm_state_t* vm, word a, word b) {
+    if (a == b) return true;
+    if (!is_ptr(a) || !is_ptr(b)) return false;
+    word* ha = ptr_from_word(a);
+    word* hb = ptr_from_word(b);
+    int ta = (int)obj_type(ha);
+    int tb = (int)obj_type(hb);
+    if (ta != tb) return false;
+    switch (ta) {
+    case OBJ_TYPE_PAIR:
+        if (!equal_rec(vm, pair_car(ha), pair_car(hb))) return false;
+        return equal_rec(vm, pair_cdr(ha), pair_cdr(hb));
+    case OBJ_TYPE_VECTOR: {
+        size_t la = vector_length(ha), lb = vector_length(hb);
+        if (la != lb) return false;
+        for (size_t i = 0; i < la; i++) {
+            if (!equal_rec(vm, vector_elem(ha, i), vector_elem(hb, i)))
+                return false;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+word prim_equal(vm_state_t* vm, int nargs) {
+    if (nargs != 2) { vm->error_code = 1; return word_nil(); }
+    return equal_rec(vm, vm->sp[0], vm->sp[1]) ? word_true() : word_false();
+}

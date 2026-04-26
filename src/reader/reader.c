@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+extern word bignum_from_string(vm_state_t* vm, const char* s, int radix);
+extern word bignum_to_fixnum_or_box(word b);
+extern word word_from_double(vm_state_t* vm, double d);
 
 static word read_expr(vm_state_t* vm, const char* s, int* pos);
 
@@ -28,6 +31,24 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
     // Character: #\name
     if (s[*pos] == '#' && s[*pos + 1] == '\\') {
         *pos += 2;
+        // Named characters
+        if (strncmp(s + *pos, "space", 5) == 0 && !isalnum(s[*pos + 5])) {
+            *pos += 5;
+            return word_from_char(' ');
+        }
+        if (strncmp(s + *pos, "newline", 7) == 0 && !isalnum(s[*pos + 7])) {
+            *pos += 7;
+            return word_from_char('\n');
+        }
+        if (strncmp(s + *pos, "tab", 3) == 0 && !isalnum(s[*pos + 3])) {
+            *pos += 3;
+            return word_from_char('\t');
+        }
+        if (strncmp(s + *pos, "return", 6) == 0 && !isalnum(s[*pos + 6])) {
+            *pos += 6;
+            return word_from_char('\r');
+        }
+        // Single character
         char c = s[*pos]; (*pos)++;
         return word_from_char((unsigned char)c);
     }
@@ -50,19 +71,46 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
         return ptr_to_word(str);
     }
 
-    // Number (integer)
-    int neg = 0;
-    if (s[*pos] == '-') { neg = 1; (*pos)++; }
-    if (isdigit(s[*pos])) {
-        int64_t val = 0;
-        while (isdigit(s[*pos])) {
-            val = val * 10 + (s[*pos] - '0');
-            (*pos)++;
+    // Number (integer or flonum)
+    int start = *pos;
+    if (s[*pos] == '-') { (*pos)++; }
+    else if (s[*pos] == '+') { (*pos)++; }
+    if (isdigit(s[*pos]) || (s[*pos] == '.' && isdigit(s[*pos+1]))) {
+        // Scan the full numeric token
+        int is_float = 0;
+        int scan = *pos;
+        while (isdigit(s[scan])) scan++;
+        if (s[scan] == '.') { is_float = 1; scan++; while (isdigit(s[scan])) scan++; }
+        if (s[scan] == 'e' || s[scan] == 'E') {
+            is_float = 1; scan++;
+            if (s[scan] == '+' || s[scan] == '-') scan++;
+            while (isdigit(s[scan])) scan++;
         }
-        if (neg) val = -val;
-        return word_from_fixnum(val);
+        int end = scan;
+
+        if (is_float) {
+            // Parse as flonum
+            char buf[128];
+            int len = end - start;
+            if (len >= 127) { vm->error_code = 1; return word_nil(); }
+            memcpy(buf, s + start, (size_t)len);
+            buf[len] = '\0';
+            *pos = end;
+            double d = strtod(buf, NULL);
+            return word_from_double(vm, d);
+        } else {
+            // Parse as integer (fixnum or bignum)
+            char buf[64];
+            int len = end - start;
+            if (len >= 63) { vm->error_code = 1; return word_nil(); }
+            memcpy(buf, s + start, (size_t)len);
+            buf[len] = '\0';
+            *pos = end;
+            word bn = bignum_from_string(vm, buf, 10);
+            return bignum_to_fixnum_or_box(bn);
+        }
     }
-    if (neg) (*pos)--;
+    *pos = start;  // Not a number, rewind
 
     // Symbol
     if (isalpha(s[*pos]) || strchr("!$%&*+-./:<=>?@^_~", s[*pos])) {
@@ -72,14 +120,9 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
                s[scan] != '"' && s[scan] != ';') {
             scan++; len++;
         }
-        size_t nwords = 3 + len;
-        word* sym = vm->gc->alloc_words(nwords);
-        obj_set_type(sym, OBJ_TYPE_SYMBOL);
-        sym[DATA_START_INDEX] = (word)len;
-        for (int i = 0; i < len; i++)
-            string_set(sym, i, word_from_char((unsigned char)s[*pos + i]));
+        word sym = vm_intern(vm, s + *pos, len);
         *pos += len;
-        return ptr_to_word(sym);
+        return sym;
     }
 
     VM_ERROR(vm, ERR_READ, "unrecognized token", word_from_char((unsigned char)s[*pos]));
@@ -130,6 +173,27 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
 
     char c = s[*pos];
     if (c == '(')  return read_list(vm, s, pos);
+    if (c == '#' && s[*pos + 1] == 'u' && s[*pos + 2] == '8' && s[*pos + 3] == '(') {
+        *pos += 4;
+        word lst = read_list_tail(vm, s, pos);
+        // Convert list to bytevector via u8-list->bytevector
+        size_t count = 0;
+        word cur = lst;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+            count++;
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+        word* bv = vm->gc->alloc_words(3 + (count + 7) / 8);
+        obj_set_type(bv, OBJ_TYPE_BYTEVECTOR);
+        bv[DATA_START_INDEX] = (word)count;
+        cur = lst;
+        for (size_t i = 0; i < count; i++) {
+            word* p = ptr_from_word(cur);
+            bytevector_data(bv)[i] = (uint8_t)(word_to_fixnum(pair_car(p)) & 0xFF);
+            cur = pair_cdr(p);
+        }
+        return ptr_to_word(bv);
+    }
     if (c == '\'') {
         (*pos)++;
         word expr = read_expr(vm, s, pos);
@@ -139,13 +203,8 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
         pair_cdr(pair2) = word_nil();
         word* pair1 = vm->gc->alloc_words(4);
         obj_set_type(pair1, OBJ_TYPE_PAIR);
-        word* qsym = vm->gc->alloc_words(3 + 5);
-        obj_set_type(qsym, OBJ_TYPE_SYMBOL);
-        qsym[DATA_START_INDEX] = (word)5;
-        const char* q = "quote";
-        for (int i = 0; i < 5; i++)
-            string_set(qsym, i, word_from_char((unsigned char)q[i]));
-        pair_car(pair1) = ptr_to_word(qsym);
+        word qsym = vm_intern(vm, "quote", 5);
+        pair_car(pair1) = qsym;
         pair_cdr(pair1) = ptr_to_word(pair2);
         return ptr_to_word(pair1);
     }

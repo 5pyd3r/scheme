@@ -6,9 +6,14 @@ scheme_core_sources = files(
   'reader/reader.c',
   'bootstrap/compiler.c',
   'debug.c',
-  'primitives/arith.c',
+  'primitives/number.c',
   'primitives/pair.c',
   'primitives/port.c',
+  'primitives/symbol.c',
+  'primitives/char.c',
+  'primitives/string.c',
+  'primitives/bytevector.c',
+  'primitives/vector.c',
 )
 
 scheme_inc = include_directories('include')
@@ -18,8 +23,9 @@ scheme_core = static_library('scheme_core',
   include_directories: scheme_inc,
 )
 
-executable('scheme',
+scheme_exe = executable('scheme',
   'main.c',
   include_directories: scheme_inc,
   link_with: scheme_core,
+  link_args: ['-lm'],
 )
