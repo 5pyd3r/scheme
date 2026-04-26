@@ -310,7 +310,7 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
 
             // Set new frame
             vm->fp = base + 3;  // fp[0]=saved_fp, fp[1]=first captured var (if nfree>0), fp[1+nfree]=arg1
-            vm->env = (word*)(uintptr_t)closure_env(clo);
+            vm->env = ptr_from_word(closure_env(clo));
             vm->sp = base + 4 + nargs + nfree;  // point past last arg
 
             vm->current_code = ptr_from_word(closure_code(clo));
@@ -349,7 +349,7 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
 
             // Reset sp, jump to new closure code
             vm->sp = vm->fp + nargs + nfree;
-            vm->env = (word*)(uintptr_t)closure_env(clo);
+            vm->env = ptr_from_word(closure_env(clo));
             vm->current_code = ptr_from_word(closure_code(clo));
             vm->ip = code_bytes(vm->current_code);
             break;
