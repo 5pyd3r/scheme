@@ -62,14 +62,137 @@ static int local_find(local_scope_t* scope, word sym) {
     return -1;
 }
 
-static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, word env, local_scope_t* parent_scope);
+// env alist: ((sym . slot) ...). Returns slot (>=1) or -1.
+static int env_find(word env, word sym) {
+    word cur = env;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* hdr = ptr_from_word(cur);
+        word entry = pair_car(hdr);
+        if (is_ptr(entry) && obj_type(ptr_from_word(entry)) == OBJ_TYPE_PAIR) {
+            word* eh = ptr_from_word(entry);
+            word entry_sym = pair_car(eh);
+            if (is_ptr(entry_sym) && is_ptr(sym) &&
+                obj_type(ptr_from_word(entry_sym)) == OBJ_TYPE_SYMBOL &&
+                obj_type(ptr_from_word(sym)) == OBJ_TYPE_SYMBOL) {
+                word* s1 = ptr_from_word(entry_sym);
+                word* s2 = ptr_from_word(sym);
+                int l1 = (int)string_length(s1);
+                int l2 = (int)string_length(s2);
+                if (l1 == l2) {
+                    int match = 1;
+                    for (int i = 0; i < l1; i++)
+                        if (string_ref(s1, i) != string_ref(s2, i)) { match = 0; break; }
+                    if (match) {
+                        word sw = pair_cdr(eh);
+                        if (is_fixnum(sw)) return (int)word_to_fixnum(sw);
+                    }
+                }
+            }
+        }
+        cur = pair_cdr(hdr);
+    }
+    return -1;
+}
 
-static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env);
+// Returns true if sym is eq?-equivalent to any symbol in the list
+static bool sym_in_list(word sym, word list) {
+    word cur = list;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word item = pair_car(ptr_from_word(cur));
+        if (is_ptr(item) && is_ptr(sym) &&
+            obj_type(ptr_from_word(item)) == OBJ_TYPE_SYMBOL &&
+            obj_type(ptr_from_word(sym)) == OBJ_TYPE_SYMBOL) {
+            word* s1 = ptr_from_word(item);
+            word* s2 = ptr_from_word(sym);
+            int l1 = (int)string_length(s1), l2 = (int)string_length(s2);
+            if (l1 == l2) {
+                int match = 1;
+                for (int i = 0; i < l1; i++)
+                    if (string_ref(s1, i) != string_ref(s2, i)) { match = 0; break; }
+                if (match) return true;
+            }
+        }
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    return false;
+}
 
-static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env);
+// Recursively collects free symbols from expr. Skips params, primitives, duplicates.
+// collected is a reversed list of symbols (built with cons).
+static void collect_free_vars_inner(vm_state_t* vm, word expr, word params, word env, word* collected) {
+    if (is_fixnum(expr) || is_char(expr) || is_nil(expr) || is_true(expr) || is_false(expr))
+        return;
+    if (!is_ptr(expr)) return;
+    word* hdr = ptr_from_word(expr);
+    int type = obj_type(hdr);
 
-static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, word env, local_scope_t* parent_scope) {
-    (void)env;
+    if (type == OBJ_TYPE_SYMBOL) {
+        if (sym_in_list(expr, params)) return;
+        if (sym_in_list(expr, *collected)) return;
+        char name[64]; int nlen = (int)string_length(hdr);
+        if (nlen < 63) {
+            for (int i = 0; i < nlen; i++) name[i] = (char)word_to_char(string_ref(hdr, i));
+            name[nlen] = '\0';
+            if (prim_lookup(name) >= 0) return;
+        }
+        if (env_find(env, expr) < 0) return;
+        word* pp = vm->gc->alloc_words(4);
+        obj_set_type(pp, OBJ_TYPE_PAIR);
+        pair_car(pp) = expr; pair_cdr(pp) = *collected;
+        *collected = ptr_to_word(pp);
+        return;
+    }
+
+    if (type == OBJ_TYPE_PAIR) {
+        word head = pair_car(hdr);
+        // Skip walking into inner lambda bodies (new scope)
+        if (is_ptr(head) && obj_type(ptr_from_word(head)) == OBJ_TYPE_SYMBOL) {
+            if (is_symbol(head, "lambda") || is_symbol(head, "let")) {
+                collect_free_vars_inner(vm, pair_cdr(hdr), params, env, collected);
+                return;
+            }
+        }
+        collect_free_vars_inner(vm, head, params, env, collected);
+        collect_free_vars_inner(vm, pair_cdr(hdr), params, env, collected);
+    }
+}
+
+// Returns alist of (sym . captured_slot) for each free variable found, slots start at 1 (VM: fp[1..nfree]=captured)
+static word collect_free_vars(vm_state_t* vm, word body, word params, word env, int nparams) {
+    (void)nparams;
+    word collected = word_nil();
+    collect_free_vars_inner(vm, body, params, env, &collected);
+    // collected is reversed source-order list. Reverse to get source-order.
+    word ordered = word_nil();
+    word cur = collected;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* hdr = ptr_from_word(cur);
+        word* pp = vm->gc->alloc_words(4); obj_set_type(pp, OBJ_TYPE_PAIR);
+        pair_car(pp) = pair_car(hdr); pair_cdr(pp) = ordered;
+        ordered = ptr_to_word(pp);
+        cur = pair_cdr(hdr);
+    }
+    // Build bindings alist with slots 1..nfree (captured vars go first in frame)
+    int slot = 1;
+    word bindings = word_nil();
+    cur = ordered;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* hdr = ptr_from_word(cur);
+        word* entry = vm->gc->alloc_words(4); obj_set_type(entry, OBJ_TYPE_PAIR);
+        pair_car(entry) = pair_car(hdr); pair_cdr(entry) = word_from_fixnum(slot);
+        word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+        pair_car(bp) = ptr_to_word(entry); pair_cdr(bp) = bindings;
+        bindings = ptr_to_word(bp);
+        slot++; cur = pair_cdr(hdr);
+    }
+    return bindings;
+}
+
+static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, local_scope_t* parent_scope);
+
+static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope);
+
+static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, local_scope_t* parent_scope) {
     (void)parent_scope;  // free variables not yet supported in stage0
     local_scope_t lambda_scope = {0};
     // Fill parameters
@@ -90,7 +213,7 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
 
     // Compile body to child code buffer
     code_buf_t child_buf = {0};
-    compile_expr_to_buf(&child_buf, vm, body, &lambda_scope, word_nil());
+    compile_expr_to_buf(&child_buf, vm, body, &lambda_scope);
     emit_byte(&child_buf, OP_RETURN);
 
     // Create child code object
@@ -123,8 +246,7 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
     for (int i = 0; i < param_idx; i++) free((void*)lambda_scope.names[i]);
 }
 
-static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env) {
-    (void)env;
+static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope) {
     DASSERT_TYPE(expr, OBJ_TYPE_PAIR);
     word* hdr = ptr_from_word(expr);
     word fn = pair_car(hdr);
@@ -166,7 +288,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             }
 
             // Compile lambda
-            compile_lambda(buf, vm, form_args, form_body, env, scope);
+            compile_lambda(buf, vm, form_args, form_body, scope);
 
             // Store to global slot for fn_sym
             word fn_sym = pair_car(ptr_from_word(name_or_form));
@@ -188,7 +310,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
 
         // Simple define: (define x val)
         word val_expr = pair_car(ptr_from_word(pair_cdr(ahdr)));
-        compile_expr_to_buf(buf, vm, val_expr, scope, env);
+        compile_expr_to_buf(buf, vm, val_expr, scope);
         word name_sym = name_or_form;
         int slot = vm_find_global_slot(vm, name_sym);
         if (slot < 0) {
@@ -215,12 +337,12 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         if (!is_nil(rest))
             else_expr = pair_car(ptr_from_word(rest));
 
-        compile_expr_to_buf(buf, vm, test, scope, env);
+        compile_expr_to_buf(buf, vm, test, scope);
         int jmp_false_pos = buf->len;
         emit_byte(buf, OP_JMP_IF_NOT);
         emit_byte(buf, 0); emit_byte(buf, 0);
 
-        compile_expr_to_buf(buf, vm, then_expr, scope, env);
+        compile_expr_to_buf(buf, vm, then_expr, scope);
         int jmp_end_pos = buf->len;
         emit_byte(buf, OP_JMP);
         emit_byte(buf, 0); emit_byte(buf, 0);
@@ -231,7 +353,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         buf->bytes[jmp_false_pos + 2] = (uint8_t)((false_offset >> 8) & 0xFF);
 
         if (!is_nil(else_expr))
-            compile_expr_to_buf(buf, vm, else_expr, scope, env);
+            compile_expr_to_buf(buf, vm, else_expr, scope);
 
         int end_offset = buf->len - (jmp_end_pos + 3);
         buf->bytes[jmp_end_pos + 1] = (uint8_t)(end_offset & 0xFF);
@@ -261,7 +383,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         } else {
             body = pair_car(body_list_hdr);
         }
-        compile_lambda(buf, vm, params, body, env, scope);
+        compile_lambda(buf, vm, params, body, scope);
         return;
     }
 
@@ -281,13 +403,13 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         word last_val = word_nil();
         for (int i = 0; i < count - 1; i++) {
             word expr = pair_car(ptr_from_word(cur));
-            compile_expr_to_buf(buf, vm, expr, scope, env);
+            compile_expr_to_buf(buf, vm, expr, scope);
             emit_byte(buf, OP_POP);
             cur = pair_cdr(ptr_from_word(cur));
         }
         // Compile last expression (value stays on stack)
         last_val = pair_car(ptr_from_word(cur));
-        compile_expr_to_buf(buf, vm, last_val, scope, env);
+        compile_expr_to_buf(buf, vm, last_val, scope);
         return;
     }
 
@@ -307,7 +429,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             cur = pair_cdr(ptr_from_word(cur));
         }
         if (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
-            vm->error_kind = 1;
+            vm->error_kind = ERR_INTERNAL;
             return;
         }
 
@@ -340,7 +462,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             }
         }
 
-        compile_expr_to_buf(buf, vm, result, scope, env);
+        compile_expr_to_buf(buf, vm, result, scope);
         return;
     }
 
@@ -397,7 +519,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         word* call_pair = vm->gc->alloc_words(4); obj_set_type(call_pair, OBJ_TYPE_PAIR);
         pair_car(call_pair) = ptr_to_word(lambda_pair); pair_cdr(call_pair) = val_list;
 
-        compile_expr_to_buf(buf, vm, ptr_to_word(call_pair), scope, env);
+        compile_expr_to_buf(buf, vm, ptr_to_word(call_pair), scope);
         return;
     }
 
@@ -419,7 +541,7 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         // Primitive call -- only compile args, not fn
         word acur = args;
         while (is_ptr(acur) && obj_type(ptr_from_word(acur)) == OBJ_TYPE_PAIR) {
-            compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur)), scope, env);
+            compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur)), scope);
             acur = pair_cdr(ptr_from_word(acur));
         }
         int nargs = 0;
@@ -439,18 +561,17 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         word acur = args;
         int nargs = 0;
         while (is_ptr(acur) && obj_type(ptr_from_word(acur)) == OBJ_TYPE_PAIR) {
-            compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur)), scope, env);
+            compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur)), scope);
             acur = pair_cdr(ptr_from_word(acur));
             nargs++;
         }
-        compile_expr_to_buf(buf, vm, fn, scope, env);
+        compile_expr_to_buf(buf, vm, fn, scope);
         emit_byte(buf, OP_CALL);
         emit_byte(buf, (uint8_t)nargs);
     }
 }
 
-static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env) {
-    (void)env;
+static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope) {
     if (is_fixnum(expr)) {
         int32_t val = (int32_t)word_to_fixnum(expr);
         emit_byte(buf, OP_PUSH_INT);
@@ -464,7 +585,7 @@ static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, loca
     if (is_ptr(expr)) {
         word* hdr = ptr_from_word(expr);
         if (obj_type(hdr) == OBJ_TYPE_PAIR) {
-            compile_list(buf, vm, expr, scope, env);
+            compile_list(buf, vm, expr, scope);
             return;
         }
     }
@@ -503,7 +624,7 @@ static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, loca
 
 word compile_expr(vm_state_t* vm, word expr) {
     code_buf_t buf = { 0 };
-    compile_expr_to_buf(&buf, vm, expr, NULL, word_nil());
+    compile_expr_to_buf(&buf, vm, expr, NULL);
     emit_byte(&buf, OP_HALT);
 
     size_t bc_words = (buf.len + sizeof(word) - 1) / sizeof(word);
