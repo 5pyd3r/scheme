@@ -529,7 +529,24 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         for (int i = n - 1; i >= 0; i--) {
             word* chdr = ptr_from_word(clauses[i]);
             word test = pair_car(chdr);
-            word body = pair_car(ptr_from_word(pair_cdr(chdr)));
+            word body_list = pair_cdr(chdr);
+            word* body_list_hdr = ptr_from_word(body_list);
+            word body;
+            if (is_ptr(pair_cdr(body_list_hdr)) &&
+                obj_type(ptr_from_word(pair_cdr(body_list_hdr))) == OBJ_TYPE_PAIR) {
+                word* bsym = vm->gc->alloc_words(3 + 5);
+                obj_set_type(bsym, OBJ_TYPE_SYMBOL);
+                bsym[DATA_START_INDEX] = (word)5;
+                const char* bname = "begin";
+                for (int bi = 0; bi < 5; bi++)
+                    string_set(bsym, bi, word_from_char((unsigned char)bname[bi]));
+                word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+                pair_car(bp) = ptr_to_word(bsym);
+                pair_cdr(bp) = body_list;
+                body = ptr_to_word(bp);
+            } else {
+                body = pair_car(body_list_hdr);
+            }
             int is_else = (is_ptr(test) && obj_type(ptr_from_word(test)) == OBJ_TYPE_SYMBOL
                            && is_symbol(test, "else"));
 
@@ -560,7 +577,25 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
     if (is_symbol(fn, "let")) {
         word* ahdr = ptr_from_word(args);
         word bindings = pair_car(ahdr);
-        word body = pair_car(ptr_from_word(pair_cdr(ahdr)));
+        word body_list = pair_cdr(ahdr);
+        word* body_list_hdr = ptr_from_word(body_list);
+        word body;
+        if (is_ptr(pair_cdr(body_list_hdr)) &&
+            obj_type(ptr_from_word(pair_cdr(body_list_hdr))) == OBJ_TYPE_PAIR) {
+            // Multiple body expressions — wrap in (begin ...)
+            word* bsym = vm->gc->alloc_words(3 + 5);
+            obj_set_type(bsym, OBJ_TYPE_SYMBOL);
+            bsym[DATA_START_INDEX] = (word)5;
+            const char* bname = "begin";
+            for (int bi = 0; bi < 5; bi++)
+                string_set(bsym, bi, word_from_char((unsigned char)bname[bi]));
+            word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+            pair_car(bp) = ptr_to_word(bsym);
+            pair_cdr(bp) = body_list;
+            body = ptr_to_word(bp);
+        } else {
+            body = pair_car(body_list_hdr);
+        }
 
         // Create "lambda" symbol
         word* ls = vm->gc->alloc_words(3 + 6);

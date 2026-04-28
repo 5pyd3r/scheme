@@ -59,6 +59,16 @@ int main(void) {
     result = eval_string(vm, "(((lambda (x) (lambda (x) x)) 1) 2)");
     CHECK(is_fixnum(result) && word_to_fixnum(result) == 2, "shadowing returns inner 2");
 
+    /* Mutual recursion (even?/odd?) */
+    eval_string(vm, "(define (even? n) (if (= n 0) #t (odd? (- n 1))))");
+    eval_string(vm, "(define (odd? n) (if (= n 0) #f (even? (- n 1))))");
+    result = eval_string(vm, "(even? 4)");
+    CHECK(result == word_true(), "mutual recursion even? 4 = #t");
+    result = eval_string(vm, "(even? 5)");
+    CHECK(result == word_false(), "mutual recursion even? 5 = #f");
+    result = eval_string(vm, "(odd? 3)");
+    CHECK(result == word_true(), "mutual recursion odd? 3 = #t");
+
     if (n_failures == 0) {
         printf("ALL closure tests PASSED\n");
         return 0;

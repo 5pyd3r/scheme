@@ -1,7 +1,41 @@
-;; + is at prim index 9 (0:cons, 1:car, 2:cdr, ..., 9:+)
-(define (compile expr)
-  (cons (list 5 1 0 0 0    ;; OP_PUSH_INT 1
-              5 2 0 0 0    ;; OP_PUSH_INT 2
-              80 2 9 0     ;; OP_PRIM_CALL nargs=2, prim=+ (index 9)
-              255)          ;; OP_HALT
-        '()))
+(define OP-PUSH-INT 5) (define OP-PUSH-CONST 4) (define OP-HALT 255)
+(define OP-PUSH-NIL 1) (define OP-PUSH-TRUE 2) (define OP-PUSH-FALSE 3)
+(define OP-POP 6) (define OP-LREF 16) (define OP-GREF 20) (define OP-GSET 21)
+(define OP-CLOSE 32) (define OP-CALL 33) (define OP-RETURN 36)
+(define OP-JMP 48) (define OP-JMP-IF-NOT 50) (define OP-PRIM-CALL 80)
+
+(define (_make-cb) (let ((dummy (cons 0 '()))) (cons dummy dummy)))
+(define (_emit-byte! cb b) (let ((n (cons b '()))) (set-cdr! (cdr cb) n) (set-cdr! cb n)))
+(define (_cb-pos cb) (let _loop ((p (cdr (car cb))) (n 0)) (if (null? p) n (_loop (cdr p) (+ n 1)))))
+(define (_cb-patch! cb pos b) (let _loop ((p (cdr (car cb))) (i 0)) (if (= i pos) (set-car! p b) (_loop (cdr p) (+ i 1)))))
+(define (_cb->list cb) (cdr (car cb)))
+(define (_make-consts) (let ((dummy (cons 0 '()))) (cons dummy dummy)))
+(define (_add-const! cs val) (let ((n (cons val '()))) (set-cdr! (cdr cs) n) (set-cdr! cs n)) (- (_cb-pos cs) 1))
+(define (_cs->list cs) (cdr (car cs)))
+(define (_count-exprs lst) (if (null? lst) 0 (+ 1 (_count-exprs (cdr lst)))))
+(define (_patch-jmp cb jmp-pos target)
+  (let ((off (- target (+ jmp-pos 3))))
+    (let ((u (if (< off 0) (+ off 65536) off)))
+      (_cb-patch! cb (+ jmp-pos 1) (remainder u 256))
+      (_cb-patch! cb (+ jmp-pos 2) (quotient u 256)))))
+
+(define (_compile-args args cb cs)
+  (if (null? args) 0 (begin (_compile-args (cdr args) cb cs) (_compile-expr (car args) cb cs))))
+
+(define (_compile-expr expr cb cs)
+  (if (fixnum? expr) (begin (_emit-byte! cb OP-PUSH-INT) (_emit-byte! cb (remainder expr 256)) (_emit-byte! cb (remainder (quotient expr 256) 256)) (_emit-byte! cb (remainder (quotient expr 65536) 256)) (_emit-byte! cb (remainder (quotient expr 16777216) 256)))
+      (if (null? expr) (_emit-byte! cb OP-PUSH-NIL)
+          (if (eq? expr #t) (_emit-byte! cb OP-PUSH-TRUE)
+              (if (eq? expr #f) (_emit-byte! cb OP-PUSH-FALSE)
+                  (if (pair? expr)
+                      (if (eq? (car expr) 'quote) (let ((idx (_add-const! cs (car (cdr expr))))) (_emit-byte! cb OP-PUSH-CONST) (_emit-byte! cb idx))
+                          (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs)
+                              (if (prim-index (car expr)) (begin (_compile-args (cdr expr) cb cs) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256)))
+                                  (begin (_compile-args (cdr expr) cb cs) (_compile-expr (car expr) cb cs) (_emit-byte! cb OP-CALL) (_emit-byte! cb (_count-exprs (cdr expr)))))))
+                      (if (symbol? expr) (let ((slot (find-global-slot expr))) (_emit-byte! cb OP-GREF) (_emit-byte! cb slot))
+                          (let ((idx (_add-const! cs expr))) (_emit-byte! cb OP-PUSH-CONST) (_emit-byte! cb idx)))))))))
+
+(define (_compile-begin args cb cs) (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs)))
+(define (_compile-begin-1 args cb cs) (if (null? (cdr args)) (_compile-expr (car args) cb cs) (begin (_compile-expr (car args) cb cs) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs))))
+
+(define (compile expr) (let ((cb (_make-cb)) (cs (_make-consts))) (_compile-expr expr cb cs) (_emit-byte! cb 255) (cons (_cb->list cb) (_cs->list cs))))
