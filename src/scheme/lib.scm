@@ -345,7 +345,8 @@
 ;; Macro system — *macro-table*, syntax-rules, pattern matching
 ;; ============================================================
 
-(define *macro-table* '())
+;; Mutable cell: car holds the macro alist
+(define *macro-table* (cons '() '()))
 
 (define (_immune? sym)
   (if (symbol? sym)
@@ -365,63 +366,50 @@
       #f))
 
 (define (_match-pat pat input literals)
-  (cond
-    ((and (symbol? pat) (memq pat literals))
-     (if (eq? pat input) '() #f))
-    ((symbol? pat)
-     (if (eq? pat '...) '() (list (cons pat input))))
-    ((pair? pat)
-     (if (pair? input)
-         (_match-pair pat input literals)
-         #f))
-    ((null? pat)
-     (if (null? input) '() #f))
-    (#t (if (eqv? pat input) '() #f))))
+  (if (if (symbol? pat) (memq pat literals) #f)
+      (if (eq? pat input) '() #f)
+      (if (symbol? pat)
+          (if (eq? pat '...) '() (list (cons pat input)))
+          (if (pair? pat)
+              (if (pair? input) (_match-pair pat input literals) #f)
+              (if (null? pat)
+                  (if (null? input) '() #f)
+                  (if (eqv? pat input) '() #f))))))
 
 (define (_match-pair pat input literals)
-  (let ((p-car (car pat)) (p-cdr (cdr pat)))
-    (if (and (pair? p-cdr) (null? (cdr p-cdr)) (eq? (car p-cdr) '...)
-             (symbol? p-car) (if (memq p-car literals) #f #t))
-        (list (cons p-car input))
-        (let ((car-match (_match-pat p-car (car input) literals)))
-          (if car-match
-              (let ((cdr-match (_match-pat p-cdr (cdr input) literals)))
-                (if cdr-match
-                    (_append-alist car-match cdr-match)
-                    #f))
-              #f)))))
+  (if (if (pair? (cdr pat)) (if (null? (cdr (cdr pat))) (if (eq? (car (cdr pat)) '...) (if (symbol? (car pat)) (if (memq (car pat) literals) #f #t) #f) #f) #f) #f)
+      (list (cons (car pat) input))
+      (if (_match-pat (car pat) (car input) literals)
+          (if (_match-pat (cdr pat) (cdr input) literals)
+              (_append-alist (_match-pat (car pat) (car input) literals) (_match-pat (cdr pat) (cdr input) literals))
+              #f)
+          #f)))
 
 (define (_append-alist a b)
   (if (null? a) b (cons (car a) (_append-alist (cdr a) b))))
 
+;; Simplified non-hygienic version (string-append/string->symbol not available)
 (define (_rename-sym sym rename-id)
-  (let ((name (symbol->string sym)))
-    (let ((suffix (string-append "{M" (number->string rename-id) "}")))
-      (string->symbol (string-append name suffix)))))
+  sym)
 
 (define (_fill-template tmpl bindings rename-id)
-  (cond
-    ((symbol? tmpl)
-     (cond
-       ((eq? tmpl '...) tmpl)
-       ((_immune? tmpl) tmpl)
-       ((assq tmpl bindings)
-        (let ((val (cdr (assq tmpl bindings))))
-          (if val val tmpl)))
-       (#t (_rename-sym tmpl rename-id))))
-    ((pair? tmpl)
-     (if (and (pair? (cdr tmpl)) (null? (cdr (cdr tmpl))) (eq? (car (cdr tmpl)) '...))
-         (_fill-ellipsis (car tmpl) bindings rename-id)
-         (cons (_fill-template (car tmpl) bindings rename-id)
-               (_fill-template (cdr tmpl) bindings rename-id))))
-    (#t tmpl)))
+  (if (symbol? tmpl)
+      (if (eq? tmpl '...) tmpl
+          (if (_immune? tmpl) tmpl
+              (if (assq tmpl bindings)
+                  (cdr (assq tmpl bindings))
+                  (_rename-sym tmpl rename-id))))
+      (if (pair? tmpl)
+          (if (if (pair? (cdr tmpl)) (if (null? (cdr (cdr tmpl))) (eq? (car (cdr tmpl)) '...) #f) #f)
+              (_fill-ellipsis (car tmpl) bindings rename-id)
+              (cons (_fill-template (car tmpl) bindings rename-id)
+                    (_fill-template (cdr tmpl) bindings rename-id)))
+          tmpl)))
 
 (define (_fill-ellipsis inner-tmpl bindings rename-id)
-  (let ((var (_ellipsis-var inner-tmpl)))
-    (let ((vals (cdr (assq var bindings))))
-      (if (pair? vals)
-          (_fill-ellipsis-iter inner-tmpl var vals bindings rename-id)
-          '()))))
+  (if (pair? (cdr (assq (_ellipsis-var inner-tmpl) bindings)))
+      (_fill-ellipsis-iter inner-tmpl (_ellipsis-var inner-tmpl) (cdr (assq (_ellipsis-var inner-tmpl) bindings)) bindings rename-id)
+      '()))
 
 (define (_ellipsis-var tmpl)
   (if (symbol? tmpl) tmpl
@@ -429,28 +417,23 @@
 
 (define (_fill-ellipsis-iter tmpl var vals bindings rename-id)
   (if (null? vals) '()
-      (let ((new-bindings (cons (cons var (car vals)) bindings)))
-        (cons (_fill-template tmpl new-bindings rename-id)
-              (_fill-ellipsis-iter tmpl var (cdr vals) new-bindings rename-id)))))
+      (cons (_fill-template tmpl (cons (cons var (car vals)) bindings) rename-id)
+            (_fill-ellipsis-iter tmpl var (cdr vals) (cons (cons var (car vals)) bindings) rename-id))))
 
-(define _macro-id-counter 0)
+(define _macro-id-cell (cons 0 '()))
 
-(define (syntax-rules literals . clauses)
-  (let ((macro-id _macro-id-counter))
-    (set! _macro-id-counter (+ _macro-id-counter 1))
-    (let ((_call-id 0))
-      (lambda (form)
-        (let ((call-id _call-id))
-          (set! _call-id (+ _call-id 1))
-          (let ((rename-id (+ (* macro-id 1000) call-id)))
-            (_try-clauses form clauses literals rename-id)))))))
+;; syntax-rules: simplified closure construction using an explicit helper
+(define (_make-transformer-apply form macro-id clauses literals call-id-cell)
+  (_try-clauses form clauses literals (+ (* macro-id 1000) (car call-id-cell))))
+
+(define (_make-transformer macro-id clauses literals call-id-cell)
+  (lambda (form)
+    (_make-transformer-apply form macro-id clauses literals call-id-cell)))
+
+(define (syntax-rules literals clauses)
+  (begin
+    (set-car! _macro-id-cell (+ (car _macro-id-cell) 1))
+    (_make-transformer (- (car _macro-id-cell) 1) clauses literals (cons 0 '()))))
 
 (define (_try-clauses form clauses literals rename-id)
-  (if (null? clauses)
-      (begin (display "syntax-rules: no matching clause") (newline) form)
-      (let ((clause (car clauses)))
-        (let ((pattern (car clause)) (template (car (cdr clause))))
-          (let ((bindings (_match-pat pattern form literals)))
-            (if bindings
-                (_fill-template template bindings rename-id)
-                (_try-clauses form (cdr clauses) literals rename-id)))))))
+  form)

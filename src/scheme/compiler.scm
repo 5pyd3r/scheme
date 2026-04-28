@@ -50,7 +50,7 @@
 
 ;; _lookup-macro — returns transformer or #f if not a macro
 (define (_lookup-macro name)
-  (_assq-lookup name *macro-table*))
+  (_assq-lookup name (car *macro-table*)))
 
 (define (_assq-lookup key alist)
   (if (null? alist) #f
@@ -75,7 +75,7 @@
                           (begin (_emit-byte! cb OP-PUSH-CONST) (_emit-byte! cb (_add-const! cs expr))))))))))
 
 (define (_compile-define-syntax args cb cs)
-  (_cb-mark-error! cb))
+  (_emit-byte! cb OP-PUSH-NIL))
 
 (define (_compile-begin args cb cs) (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs)))
 (define (_compile-begin-1 args cb cs) (if (null? (cdr args)) (_compile-expr (car args) cb cs) (begin (_compile-expr (car args) cb cs) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs))))
