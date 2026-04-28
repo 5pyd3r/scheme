@@ -340,3 +340,117 @@
   (lambda (a b)
     (_bv-app a b (bytevector-length a) (bytevector-length b)
              (make-bytevector (+ (bytevector-length a) (bytevector-length b)) 0))))
+
+;; ============================================================
+;; Macro system — *macro-table*, syntax-rules, pattern matching
+;; ============================================================
+
+(define *macro-table* '())
+
+(define (_immune? sym)
+  (if (symbol? sym)
+      (if (eq? sym 'lambda) #t
+          (if (eq? sym 'if) #t
+              (if (eq? sym 'define) #t
+                  (if (eq? sym 'set!) #t
+                      (if (eq? sym 'begin) #t
+                          (if (eq? sym 'quote) #t
+                              (if (eq? sym 'cond) #t
+                                  (if (eq? sym 'let) #t
+                                      (if (eq? sym 'else) #t
+                                          (if (eq? sym 'define-syntax) #t
+                                              (if (eq? sym 'syntax-rules) #t
+                                                  (if (eq? sym '...) #t
+                                                      (if (prim-index sym) #t #f)))))))))))))
+      #f))
+
+(define (_match-pat pat input literals)
+  (cond
+    ((and (symbol? pat) (memq pat literals))
+     (if (eq? pat input) '() #f))
+    ((symbol? pat)
+     (if (eq? pat '...) '() (list (cons pat input))))
+    ((pair? pat)
+     (if (pair? input)
+         (_match-pair pat input literals)
+         #f))
+    ((null? pat)
+     (if (null? input) '() #f))
+    (#t (if (eqv? pat input) '() #f))))
+
+(define (_match-pair pat input literals)
+  (let ((p-car (car pat)) (p-cdr (cdr pat)))
+    (if (and (pair? p-cdr) (null? (cdr p-cdr)) (eq? (car p-cdr) '...)
+             (symbol? p-car) (if (memq p-car literals) #f #t))
+        (list (cons p-car input))
+        (let ((car-match (_match-pat p-car (car input) literals)))
+          (if car-match
+              (let ((cdr-match (_match-pat p-cdr (cdr input) literals)))
+                (if cdr-match
+                    (_append-alist car-match cdr-match)
+                    #f))
+              #f)))))
+
+(define (_append-alist a b)
+  (if (null? a) b (cons (car a) (_append-alist (cdr a) b))))
+
+(define (_rename-sym sym rename-id)
+  (let ((name (symbol->string sym)))
+    (let ((suffix (string-append "{M" (number->string rename-id) "}")))
+      (string->symbol (string-append name suffix)))))
+
+(define (_fill-template tmpl bindings rename-id)
+  (cond
+    ((symbol? tmpl)
+     (cond
+       ((eq? tmpl '...) tmpl)
+       ((_immune? tmpl) tmpl)
+       ((assq tmpl bindings)
+        (let ((val (cdr (assq tmpl bindings))))
+          (if val val tmpl)))
+       (#t (_rename-sym tmpl rename-id))))
+    ((pair? tmpl)
+     (if (and (pair? (cdr tmpl)) (null? (cdr (cdr tmpl))) (eq? (car (cdr tmpl)) '...))
+         (_fill-ellipsis (car tmpl) bindings rename-id)
+         (cons (_fill-template (car tmpl) bindings rename-id)
+               (_fill-template (cdr tmpl) bindings rename-id))))
+    (#t tmpl)))
+
+(define (_fill-ellipsis inner-tmpl bindings rename-id)
+  (let ((var (_ellipsis-var inner-tmpl)))
+    (let ((vals (cdr (assq var bindings))))
+      (if (pair? vals)
+          (_fill-ellipsis-iter inner-tmpl var vals bindings rename-id)
+          '()))))
+
+(define (_ellipsis-var tmpl)
+  (if (symbol? tmpl) tmpl
+      (if (pair? tmpl) (_ellipsis-var (car tmpl)) #f)))
+
+(define (_fill-ellipsis-iter tmpl var vals bindings rename-id)
+  (if (null? vals) '()
+      (let ((new-bindings (cons (cons var (car vals)) bindings)))
+        (cons (_fill-template tmpl new-bindings rename-id)
+              (_fill-ellipsis-iter tmpl var (cdr vals) new-bindings rename-id)))))
+
+(define _macro-id-counter 0)
+
+(define (syntax-rules literals . clauses)
+  (let ((macro-id _macro-id-counter))
+    (set! _macro-id-counter (+ _macro-id-counter 1))
+    (let ((_call-id 0))
+      (lambda (form)
+        (let ((call-id _call-id))
+          (set! _call-id (+ _call-id 1))
+          (let ((rename-id (+ (* macro-id 1000) call-id)))
+            (_try-clauses form clauses literals rename-id)))))))
+
+(define (_try-clauses form clauses literals rename-id)
+  (if (null? clauses)
+      (begin (display "syntax-rules: no matching clause") (newline) form)
+      (let ((clause (car clauses)))
+        (let ((pattern (car clause)) (template (car (cdr clause))))
+          (let ((bindings (_match-pat pattern form literals)))
+            (if bindings
+                (_fill-template template bindings rename-id)
+                (_try-clauses form (cdr clauses) literals rename-id)))))))

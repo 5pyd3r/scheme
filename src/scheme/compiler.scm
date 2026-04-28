@@ -21,7 +21,7 @@
 
 (define (_compile-args args cb cs) (if (null? args) 0 (begin (_compile-args (cdr args) cb cs) (_compile-expr (car args) cb cs))))
 
-;; _is-handled? — returns #t if the compiler handles this form
+;; _is-handled? — returns #t if the compiler handles this form directly
 (define (_is-handled? fn)
   (if (eq? fn 'begin) #t
       (if (eq? fn 'cons) #t
@@ -45,7 +45,17 @@
                                                                               (if (eq? fn 'prim-index) #t
                                                                                   (if (eq? fn 'assemble-code) #t
                                                                                       (if (eq? fn 'find-global-slot) #t
-                                                                                          #f)))))))))))))))))))))))
+                                                                                          (if (eq? fn 'define-syntax) #t
+                                                                                              #f))))))))))))))))))))))))
+
+;; _lookup-macro — returns transformer or #f if not a macro
+(define (_lookup-macro name)
+  (_assq-lookup name *macro-table*))
+
+(define (_assq-lookup key alist)
+  (if (null? alist) #f
+      (if (eq? key (car (car alist))) (cdr (car alist))
+          (_assq-lookup key (cdr alist)))))
 
 (define (_compile-expr expr cb cs)
   (if (fixnum? expr) (begin (_emit-byte! cb OP-PUSH-INT) (_emit-byte! cb (remainder expr 256)) (_emit-byte! cb (remainder (quotient expr 256) 256)) (_emit-byte! cb (remainder (quotient expr 65536) 256)) (_emit-byte! cb (remainder (quotient expr 16777216) 256)))
@@ -53,12 +63,19 @@
           (if (eq? expr #t) (_emit-byte! cb OP-PUSH-TRUE)
               (if (eq? expr #f) (_emit-byte! cb OP-PUSH-FALSE)
                   (if (pair? expr)
-                      (if (_is-handled? (car expr))
-                          (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs)
-                              (begin (_compile-args (cdr expr) cb cs) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256))))
-                          (_cb-mark-error! cb))
+                      (if (eq? (car expr) 'define-syntax)
+                          (_compile-define-syntax (cdr expr) cb cs)
+                          (if (_lookup-macro (car expr))
+                              (_compile-expr ((_lookup-macro (car expr)) expr) cb cs)
+                              (if (_is-handled? (car expr))
+                                  (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs)
+                                      (begin (_compile-args (cdr expr) cb cs) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256))))
+                                  (_cb-mark-error! cb))))
                       (if (symbol? expr) (begin (_emit-byte! cb OP-GREF) (_emit-byte! cb (find-global-slot expr)))
                           (begin (_emit-byte! cb OP-PUSH-CONST) (_emit-byte! cb (_add-const! cs expr))))))))))
+
+(define (_compile-define-syntax args cb cs)
+  (_cb-mark-error! cb))
 
 (define (_compile-begin args cb cs) (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs)))
 (define (_compile-begin-1 args cb cs) (if (null? (cdr args)) (_compile-expr (car args) cb cs) (begin (_compile-expr (car args) cb cs) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs))))
