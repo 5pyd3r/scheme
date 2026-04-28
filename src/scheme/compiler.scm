@@ -23,8 +23,7 @@
 
 ;; _is-handled? — returns #t if the compiler handles this form directly
 (define (_is-handled? fn)
-  (if (eq? fn 'begin) #t
-      (if (eq? fn 'cons) #t
+  (if (eq? fn 'cons) #t
           (if (eq? fn 'car) #t
               (if (eq? fn 'cdr) #t
                   (if (eq? fn 'null?) #t
@@ -46,7 +45,7 @@
                                                                                   (if (eq? fn 'assemble-code) #t
                                                                                       (if (eq? fn 'find-global-slot) #t
                                                                                           (if (eq? fn 'define-syntax) #t
-                                                                                              #f))))))))))))))))))))))))
+                                                                                              #f)))))))))))))))))))))))
 
 ;; _lookup-macro — returns transformer or #f if not a macro
 (define (_lookup-macro name)
@@ -80,4 +79,100 @@
 (define (_compile-begin args cb cs) (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs)))
 (define (_compile-begin-1 args cb cs) (if (null? (cdr args)) (_compile-expr (car args) cb cs) (begin (_compile-expr (car args) cb cs) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs))))
 
+;; === Macro system (in compiler.scm for Phase 1a loading) ===
+(define _macro-id-cell (cons 0 '()))
+
+(define (_immune? sym)
+  (if (symbol? sym)
+      (if (eq? sym 'lambda) #t
+          (if (eq? sym 'if) #t
+              (if (eq? sym 'define) #t
+                  (if (eq? sym 'set!) #t
+                      (if (eq? sym 'begin) #t
+                          (if (eq? sym 'quote) #t
+                              (if (eq? sym 'cond) #t
+                                  (if (eq? sym 'let) #t
+                                      (if (eq? sym 'else) #t
+                                          (if (eq? sym 'define-syntax) #t
+                                              (if (eq? sym 'syntax-rules) #t
+                                                  (if (eq? sym '...) #t
+                                                      (if (prim-index sym) #t #f)))))))))))))
+      #f))
+
+(define (_match-pat pat input literals)
+  (if (if (symbol? pat) (memq pat literals) #f)
+      (if (eq? pat input) '() #f)
+      (if (symbol? pat)
+          (if (eq? pat '...) '() (list (cons pat input)))
+          (if (pair? pat)
+              (if (pair? input) (_match-pair pat input literals) #f)
+              (if (null? pat)
+                  (if (null? input) '() #f)
+                  (if (eqv? pat input) '() #f))))))
+
+(define (_match-pair pat input literals)
+  (if (if (pair? (cdr pat)) (if (null? (cdr (cdr pat))) (if (eq? (car (cdr pat)) '...) (if (symbol? (car pat)) (if (memq (car pat) literals) #f #t) #f) #f) #f) #f)
+      (list (cons (car pat) input))
+      (if (_match-pat (car pat) (car input) literals)
+          (if (_match-pat (cdr pat) (cdr input) literals)
+              (_append-alist (_match-pat (car pat) (car input) literals) (_match-pat (cdr pat) (cdr input) literals))
+              #f)
+          #f)))
+
+(define (_append-alist a b)
+  (if (null? a) b (cons (car a) (_append-alist (cdr a) b))))
+
+(define (_rename-sym sym rename-id) sym)
+
+(define (_fill-template tmpl bindings rename-id)
+  (if (symbol? tmpl)
+      (if (eq? tmpl '...) tmpl
+          (if (_immune? tmpl) tmpl
+              (if (assq tmpl bindings)
+                  (cdr (assq tmpl bindings))
+                  (_rename-sym tmpl rename-id))))
+      (if (pair? tmpl)
+          (if (if (pair? (cdr tmpl)) (if (null? (cdr (cdr tmpl))) (eq? (car (cdr tmpl)) '...) #f) #f)
+              (_fill-ellipsis (car tmpl) bindings rename-id)
+              (cons (_fill-template (car tmpl) bindings rename-id)
+                    (_fill-template (cdr tmpl) bindings rename-id)))
+          tmpl)))
+
+(define (_fill-ellipsis inner-tmpl bindings rename-id)
+  (if (pair? (cdr (assq (_ellipsis-var inner-tmpl) bindings)))
+      (_fill-ellipsis-iter inner-tmpl (_ellipsis-var inner-tmpl) (cdr (assq (_ellipsis-var inner-tmpl) bindings)) bindings rename-id)
+      '()))
+
+(define (_ellipsis-var tmpl)
+  (if (symbol? tmpl) tmpl
+      (if (pair? tmpl) (_ellipsis-var (car tmpl)) #f)))
+
+(define (_fill-ellipsis-iter tmpl var vals bindings rename-id)
+  (if (null? vals) '()
+      (cons (_fill-template tmpl (cons (cons var (car vals)) bindings) rename-id)
+            (_fill-ellipsis-iter tmpl var (cdr vals) (cons (cons var (car vals)) bindings) rename-id))))
+
+(define (_try-clauses form clauses literals rename-id)
+  (if (null? clauses)
+      form
+      (if (_match-pat (car (car clauses)) form literals)
+          (_fill-template (car (cdr (car clauses))) (_match-pat (car (car clauses)) form literals) rename-id)
+          (_try-clauses form (cdr clauses) literals rename-id))))
+
+(define (_make-transformer-apply form macro-id clauses literals call-id-cell)
+  (_try-clauses form clauses literals (+ (* macro-id 1000) (car call-id-cell))))
+
+(define (_make-transformer macro-id clauses literals call-id-cell)
+  (lambda (form)
+    (_make-transformer-apply form macro-id clauses literals call-id-cell)))
+
+(define (_sr-helper macro-id clauses literals)
+  (_make-transformer macro-id clauses literals (cons 0 '())))
+
+(define (syntax-rules literals clauses)
+  (begin
+    (set-car! _macro-id-cell (+ (car _macro-id-cell) 1))
+    (_sr-helper (- (car _macro-id-cell) 1) clauses literals)))
+
+;; === Main entry ===
 (define (compile expr) (let ((cb (_make-cb)) (cs (_make-consts))) (_compile-expr expr cb cs) (if (_cb-is-error? cb) #f (begin (_emit-byte! cb 255) (cons (_cb->list cb) (_cs->list cs))))))
