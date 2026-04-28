@@ -105,6 +105,8 @@ word prim_bytevector_u8_ref(vm_state_t* vm, int nargs);
 word prim_bytevector_u8_set(vm_state_t* vm, int nargs);
 word prim_bytevector_to_u8_list(vm_state_t* vm, int nargs);
 word prim_u8_list_to_bytevector(vm_state_t* vm, int nargs);
+word prim_gensym(vm_state_t* vm, int nargs);
+word prim_eval(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
@@ -298,6 +300,8 @@ static prim_entry_t prim_table[] = {
     {"bytevector-u8-set!",    prim_bytevector_u8_set},
     {"bytevector->u8-list",   prim_bytevector_to_u8_list},
     {"u8-list->bytevector",   prim_u8_list_to_bytevector},
+    {"gensym",           prim_gensym},
+    {"eval",             prim_eval},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 

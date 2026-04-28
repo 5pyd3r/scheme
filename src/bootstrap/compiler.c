@@ -793,3 +793,37 @@ word compile_program(vm_state_t* vm, word exprs) {
     }
     return compile_expr(vm, pair_car(ptr_from_word(exprs)));
 }
+
+int scheme_compile_and_assemble(vm_state_t* vm, word expr) {
+    int compile_slot = vm_find_global_by_name(vm, "compile");
+    if (compile_slot < 0) return -1;
+
+    int asm_idx = prim_lookup("assemble-code");
+    if (asm_idx < 0) return -1;
+
+    uint8_t bc[32];
+    int len = 0;
+    bc[len++] = OP_PUSH_CONST; bc[len++] = 0;
+    bc[len++] = OP_GREF;       bc[len++] = (uint8_t)compile_slot;
+    bc[len++] = OP_CALL;       bc[len++] = 1;
+    bc[len++] = OP_PRIM_CALL;  bc[len++] = 1;
+    bc[len++] = (uint8_t)(asm_idx & 0xFF);
+    bc[len++] = (uint8_t)((asm_idx >> 8) & 0xFF);
+    bc[len++] = OP_HALT;
+
+    size_t bc_words = ((size_t)len + sizeof(word) - 1) / sizeof(word);
+    size_t total = 3 + bc_words + 1;
+    word* obj = vm->gc->alloc_words(total);
+    obj_set_type(obj, OBJ_TYPE_CODE);
+    obj[2] = (word)len;
+    memcpy(obj + 3, bc, (size_t)len);
+    obj[3 + bc_words] = expr;
+
+    int idx = vm_load_code(vm, obj);
+    if (idx < 0) return -1;
+
+    word result = vm_execute(vm, idx);
+    if (is_fixnum(result))
+        return (int)word_to_fixnum(result);
+    return -1;
+}

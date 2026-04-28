@@ -32,6 +32,7 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm->symbol_table = NULL;
     vm->symbol_count = 0;
     vm->symbol_capacity = 0;
+    vm->gensym_counter = 0;
 
     return vm;
 }
