@@ -347,3 +347,12 @@
 
 ;; Mutable cell: car holds the macro alist
 (define *macro-table* (cons '() '()))
+
+;; === map and for-each (Scheme implementations) ===
+(define (map proc lst)
+  (if (null? lst) '()
+      (cons (proc (car lst)) (map proc (cdr lst)))))
+
+(define (for-each proc lst)
+  (if (null? lst) 0
+      (begin (proc (car lst)) (for-each proc (cdr lst)))))
