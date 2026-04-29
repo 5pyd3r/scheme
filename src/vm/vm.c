@@ -264,6 +264,83 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             break;
         }
 
+        case OP_APPLY: {
+            uint8_t nargs = read_u8(&vm->ip);
+            // Save original sp (before any adjustment)
+            word* orig_sp = vm->sp;  // points to last arg (list)
+            vm->sp -= (nargs - 1);  // sp now at closure (first arg)
+            word closure = vm->sp[0];
+            int nindividual = nargs - 2;
+            word list_arg = vm->sp[nargs - 1];
+            // Count list elements
+            int list_len = 0;
+            word cur = list_arg;
+            while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+                list_len++;
+                cur = pair_cdr(ptr_from_word(cur));
+            }
+            if (!is_nil(cur)) {
+                vm->error_kind = ERR_TYPE;
+                vm->error_msg = "apply: last argument must be a proper list";
+                return word_nil();
+            }
+            int total_args = nindividual + list_len;
+            // Save individual args and list elements locally, then rebuild stack
+            word saved_individual[128];
+            word saved_list[1024];
+            for (int i = 0; i < nindividual && i < 128; i++)
+                saved_individual[i] = vm->sp[1 + i];
+            cur = list_arg;
+            for (int i = 0; i < list_len && i < 1024; i++) {
+                saved_list[i] = pair_car(ptr_from_word(cur));
+                cur = pair_cdr(ptr_from_word(cur));
+            }
+            // Reset sp: go BEFORE the first apply arg pushed by compiler
+            // orig_sp was at last arg; there are nargs total args.
+            vm->sp = orig_sp - nargs;
+            // Push all call args LEFT TO RIGHT: individual args, then list elements
+            for (int i = 0; i < nindividual; i++)
+                *++vm->sp = saved_individual[i];
+            for (int i = 0; i < list_len; i++)
+                *++vm->sp = saved_list[i];
+            // Push closure (top of stack)
+            *++vm->sp = closure;
+            // Compute base pointer (used by both prim and closure paths)
+            word* base = vm->sp - total_args;
+            // Check if "closure" is actually a primitive fixnum index
+            if (is_fixnum(closure)) {
+                int pidx = (int)word_to_fixnum(closure);
+                word* saved_sp = vm->sp;
+                vm->sp = base + total_args - 1;  // point to last arg
+                vm->sp -= (total_args - 1);       // adjust to first arg
+                word result = vm_dispatch_prim(vm, pidx, total_args);
+                vm->sp = saved_sp;  // restore to closure position
+                *vm->sp = result;   // replace closure with result
+                break;
+            }
+            // Regular closure call (same as OP_CALL frame setup)
+            word* clo2 = ptr_from_word(closure);
+            uint8_t nfree2 = (uint8_t)(clo2[DATA_START_INDEX + 2]);
+            word old_sp = (word)(uintptr_t)(base - 1);
+            for (int i = total_args - 1; i >= 0; i--)
+                base[i + 4 + nfree2] = base[i];
+            base[0] = old_sp;
+            base[1] = (word)(uintptr_t)vm->ip;
+            base[2] = (word)(uintptr_t)vm->env;
+            base[3] = (word)(uintptr_t)vm->fp;
+            if (nfree2 > 0) {
+                word* env_vec = ptr_from_word(closure_env(clo2));
+                for (int i = 0; i < nfree2; i++)
+                    base[4 + i] = env_vec[DATA_START_INDEX + 1 + i];
+            }
+            vm->fp = base + 3;
+            vm->env = ptr_from_word(closure_env(clo2));
+            vm->sp = base + 4 + total_args + nfree2;
+            vm->current_code = ptr_from_word(closure_code(clo2));
+            vm->ip = code_bytes(vm->current_code);
+            break;
+        }
+
         case OP_CLOSE: {
             uint16_t code_idx = read_u16(&vm->ip);
             uint8_t nfree = read_u8(&vm->ip);

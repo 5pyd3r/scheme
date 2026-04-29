@@ -906,22 +906,60 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
     }
 
     if (known_prim_idx >= 0) {
-        // Primitive call -- only compile args, not fn
-        word acur = args;
-        while (is_ptr(acur) && obj_type(ptr_from_word(acur)) == OBJ_TYPE_PAIR) {
-            compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur)), scope, env);
-            acur = pair_cdr(ptr_from_word(acur));
-        }
+        // Count args
         int nargs = 0;
-        acur = args;
+        word acur = args;
         while (is_ptr(acur) && obj_type(ptr_from_word(acur)) == OBJ_TYPE_PAIR) {
             nargs++;
             acur = pair_cdr(ptr_from_word(acur));
         }
-        emit_byte(buf, OP_PRIM_CALL);
-        emit_byte(buf, (uint8_t)nargs);
-        emit_byte(buf, (uint8_t)(known_prim_idx & 0xFF));
-        emit_byte(buf, (uint8_t)((known_prim_idx >> 8) & 0xFF));
+        // Check for apply: use OP_APPLY opcode instead of OP_PRIM_CALL
+        if (is_symbol(fn, "apply")) {
+            // First arg is the function. If it's a known primitive, push its
+            // prim index as a fixnum (instead of GREF which returns nil for primitives).
+            word apply_fn = pair_car(ptr_from_word(args));
+            if (is_ptr(apply_fn) && obj_type(ptr_from_word(apply_fn)) == OBJ_TYPE_SYMBOL) {
+                word* fhdr = ptr_from_word(apply_fn);
+                int nlen = (int)string_length(fhdr);
+                char fname[64];
+                if (nlen < 63) {
+                    for (int i = 0; i < nlen; i++)
+                        fname[i] = (char)word_to_char(string_ref(fhdr, i));
+                    fname[nlen] = '\0';
+                    int apply_prim_idx = prim_lookup(fname);
+                    if (apply_prim_idx >= 0) {
+                        emit_byte(buf, OP_PUSH_INT);
+                        int32_t pval = (int32_t)apply_prim_idx;
+                        emit_byte(buf, (uint8_t)(pval & 0xFF));
+                        emit_byte(buf, (uint8_t)((pval >> 8) & 0xFF));
+                        emit_byte(buf, (uint8_t)((pval >> 16) & 0xFF));
+                        emit_byte(buf, (uint8_t)((pval >> 24) & 0xFF));
+                    } else {
+                        compile_expr_to_buf(buf, vm, apply_fn, scope, env);
+                    }
+                }
+            } else {
+                compile_expr_to_buf(buf, vm, apply_fn, scope, env);
+            }
+            // Compile remaining args (individual args + list)
+            word acur2 = pair_cdr(ptr_from_word(args));
+            while (is_ptr(acur2) && obj_type(ptr_from_word(acur2)) == OBJ_TYPE_PAIR) {
+                compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur2)), scope, env);
+                acur2 = pair_cdr(ptr_from_word(acur2));
+            }
+            emit_byte(buf, OP_APPLY);
+            emit_byte(buf, (uint8_t)nargs);
+        } else {
+            word acur2 = args;
+            while (is_ptr(acur2) && obj_type(ptr_from_word(acur2)) == OBJ_TYPE_PAIR) {
+                compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(acur2)), scope, env);
+                acur2 = pair_cdr(ptr_from_word(acur2));
+            }
+            emit_byte(buf, OP_PRIM_CALL);
+            emit_byte(buf, (uint8_t)nargs);
+            emit_byte(buf, (uint8_t)(known_prim_idx & 0xFF));
+            emit_byte(buf, (uint8_t)((known_prim_idx >> 8) & 0xFF));
+        }
     } else {
         // User function call — compile args first, then fn (closure on top)
         // This ensures nested calls work: inner calls return, their results are below
