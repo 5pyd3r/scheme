@@ -15,14 +15,18 @@ word prim_cons(vm_state_t* vm, int nargs) {
 
 word prim_car(vm_state_t* vm, int nargs) {
     if (nargs != 1) { VM_ERROR(vm, ERR_ARITY, "car: expected 1 argument", word_nil()); return word_nil(); }
-    word* pair = ptr_from_word(vm->sp[0]);
-    return pair_car(pair);
+    word w = vm->sp[0];
+    if (!is_ptr(w) || obj_type(ptr_from_word(w)) != OBJ_TYPE_PAIR)
+        { VM_ERROR(vm, ERR_TYPE, "car: expected pair", w); return word_nil(); }
+    return pair_car(ptr_from_word(w));
 }
 
 word prim_cdr(vm_state_t* vm, int nargs) {
     if (nargs != 1) { VM_ERROR(vm, ERR_ARITY, "cdr: expected 1 argument", word_nil()); return word_nil(); }
-    word* pair = ptr_from_word(vm->sp[0]);
-    return pair_cdr(pair);
+    word w = vm->sp[0];
+    if (!is_ptr(w) || obj_type(ptr_from_word(w)) != OBJ_TYPE_PAIR)
+        { VM_ERROR(vm, ERR_TYPE, "cdr: expected pair", w); return word_nil(); }
+    return pair_cdr(ptr_from_word(w));
 }
 
 word prim_null(vm_state_t* vm, int nargs) {

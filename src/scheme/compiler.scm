@@ -22,9 +22,10 @@
 ;; === Helpers for closure capture (defined before _compile-expr) ===
 ;; _assq-lookup: return cdr of matching key in alist, or #f
 (define (_assq-lookup key alist)
-  (if (null? alist) #f
+  (if (pair? alist)
       (if (eq? key (car (car alist))) (cdr (car alist))
-          (_assq-lookup key (cdr alist)))))
+          (_assq-lookup key (cdr alist)))
+      #f))
 
 ;; _is-primitive?: #t if sym is a known primitive
 (define (_is-primitive? sym)
@@ -70,42 +71,41 @@
       (_append (_free-syms (car lst) params env)
                (_free-syms-list (cdr lst) params env))))
 
-;; _compile-args: compile argument list right-to-left
+;; _compile-args: compile argument list left-to-right (matching VM stack order)
 (define (_compile-args args cb cs env)
-  (if (null? args) 0 (begin (_compile-args (cdr args) cb cs env) (_compile-expr (car args) cb cs env))))
+  (if (null? args) 0 (begin (_compile-expr (car args) cb cs env) (_compile-args (cdr args) cb cs env))))
 
-;; _is-handled? — returns #t if the compiler handles this form directly
+;; _is-handled? -- returns #t if the compiler handles this form directly
 (define (_is-handled? fn)
   (if (eq? fn 'lambda) #t
       (if (eq? fn 'cons) #t
-          (if (eq? fn 'car) #t
-              (if (eq? fn 'cdr) #t
-                  (if (eq? fn 'null?) #t
-                      (if (eq? fn 'pair?) #t
-                          (if (eq? fn 'eq?) #t
-                              (if (eq? fn 'eqv?) #t
-                                  (if (eq? fn '+) #t
-                                      (if (eq? fn '-) #t
-                                          (if (eq? fn '*) #t
-                                              (if (eq? fn '/) #t
-                                                  (if (eq? fn '<) #t
-                                                      (if (eq? fn '>) #t
-                                                          (if (eq? fn '=) #t
-                                                              (if (eq? fn 'display) #t
-                                                                  (if (eq? fn 'newline) #t
-                                                                      (if (eq? fn 'remainder) #t
-                                                                          (if (eq? fn 'quotient) #t
-                                                                              (if (eq? fn 'prim-index) #t
-                                                                                  (if (eq? fn 'assemble-code) #t
-                                                                                      (if (eq? fn 'find-global-slot) #t
-                                                                                          (if (eq? fn 'define-syntax) #t
-                                                                                              #f))))))))))))))))))))))))
+          (if (eq? fn 'null?) #t
+              (if (eq? fn 'pair?) #t
+                  (if (eq? fn 'eqv?) #t
+                      (if (eq? fn '+) #t
+                          (if (eq? fn '-) #t
+                              (if (eq? fn '*) #t
+                                  (if (eq? fn '/) #t
+                                      (if (eq? fn '<) #t
+                                          (if (eq? fn '>) #t
+                                              (if (eq? fn '=) #t
+                                                  (if (eq? fn 'display) #t
+                                                      (if (eq? fn 'newline) #t
+                                                          (if (eq? fn 'remainder) #t
+                                                              (if (eq? fn 'quotient) #t
+                                                                  (if (eq? fn 'prim-index) #t
+                                                                      (if (eq? fn 'assemble-code) #t
+                                                                          (if (eq? fn 'find-global-slot) #t
+                                                                              (if (eq? fn 'define-syntax) #t
+                                                                                  #f)))))))))))))))))))))
 
-;; _lookup-macro — returns transformer or #f if not a macro
+;; _lookup-macro -- returns transformer or #f if not a macro
 (define (_lookup-macro name)
-  (_assq-lookup name (car *macro-table*)))
+  (if (pair? *macro-table*)
+      (_assq-lookup name (car *macro-table*))
+      #f))
 
-;; Top-level macro expansion — called from C trampoline, not from _compile-expr
+;; Top-level macro expansion -- called from C trampoline, not from _compile-expr
 (define (_expand-once form)
   (if (pair? form)
       (let ((t (_lookup-macro (car form))))

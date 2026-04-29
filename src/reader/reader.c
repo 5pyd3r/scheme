@@ -129,6 +129,12 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
     return word_nil();
 }
 
+/* Return non-zero if c can be part of a Scheme symbol (after the first char). */
+static int is_sym_char(char c) {
+    return isalpha((unsigned char)c) || isdigit((unsigned char)c) ||
+           (c && strchr("!$%&*+-./:<=>?@^_~", c));
+}
+
 static word read_list_tail(vm_state_t* vm, const char* s, int* pos) {
     skip_ws(s, pos);
 
@@ -142,7 +148,9 @@ static word read_list_tail(vm_state_t* vm, const char* s, int* pos) {
     skip_ws(s, pos);
 
     word cdr;
-    if (s[*pos] == '.') {
+    /* Only treat "." as dotted-pair notation when it stands alone.
+       ". followed by a symbol char (e.g. "...", ".foo") is an identifier. */
+    if (s[*pos] == '.' && !is_sym_char(s[*pos + 1])) {
         (*pos)++;
         skip_ws(s, pos);
         cdr = read_expr(vm, s, pos);

@@ -3,6 +3,8 @@
 #include "prim.h"
 #include "vm/opcodes.h"
 #include <stdio.h>
+
+extern word prim_eval(vm_state_t* vm, int nargs);
 #include <string.h>
 #include <stdlib.h>
 
@@ -618,6 +620,41 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             buf->bytes[jmp_positions[i] + 2] = (uint8_t)((off >> 8) & 0xFF);
         }
         free(jmp_positions);
+        return;
+    }
+
+    if (is_symbol(fn, "define-syntax")) {
+        // (define-syntax name transformer-expr)
+        // Evaluate transformer via prim_eval and store in *macro-table*
+        word name_sym = pair_car(ptr_from_word(args));
+        word trans_expr = pair_car(ptr_from_word(pair_cdr(ptr_from_word(args))));
+        // Push trans_expr onto stack for prim_eval, save/restore all VM state
+        word* saved_sp = vm->sp;
+        uint8_t* saved_ip = vm->ip;
+        word* saved_fp = vm->fp;
+        word* saved_env = vm->env;
+        word* saved_code = vm->current_code;
+        *++vm->sp = trans_expr;
+        word transformer = prim_eval(vm, 1);
+        vm->sp = saved_sp;
+        vm->ip = saved_ip;
+        vm->fp = saved_fp;
+        vm->env = saved_env;
+        vm->current_code = saved_code;
+        // Store: (set-car! *macro-table* (cons (cons name transformer) (car *macro-table*)))
+        int mt_slot = vm_find_global_by_name(vm, "*macro-table*");
+        if (mt_slot >= 0) {
+            word mt_val = vm->globals[mt_slot];
+            if (is_ptr(mt_val) && obj_type(ptr_from_word(mt_val)) == OBJ_TYPE_PAIR) {
+                word* entry = vm->gc->alloc_words(4); obj_set_type(entry, OBJ_TYPE_PAIR);
+                pair_car(entry) = name_sym; pair_cdr(entry) = transformer;
+                word* entry_node = vm->gc->alloc_words(4); obj_set_type(entry_node, OBJ_TYPE_PAIR);
+                pair_car(entry_node) = ptr_to_word(entry);
+                pair_cdr(entry_node) = pair_car(ptr_from_word(mt_val));
+                pair_car(ptr_from_word(mt_val)) = ptr_to_word(entry_node);
+            }
+        }
+        emit_byte(buf, OP_PUSH_NIL);
         return;
     }
 

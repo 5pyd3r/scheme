@@ -356,3 +356,17 @@
 (define (for-each proc lst)
   (if (null? lst) 0
       (begin (proc (car lst)) (for-each proc (cdr lst)))))
+
+
+;; === Derived expression types (R7RS macros) ===
+;; NOTE: define-syntax is handled by C compiler during Phase 1b loading.
+;; Clauses must be quoted since syntax-rules is a function, not a special form.
+
+;; TODO: letrec — requires multi-variable ellipsis in pattern matcher,
+;; plus set! updating captured closure copies (flat closure model limitation).
+
+(define-syntax when
+  (syntax-rules () '(((_ test body ...) (if test (begin body ...))))))
+
+(define-syntax unless
+  (syntax-rules () '(((_ test body ...) (if test #f (begin body ...))))))
