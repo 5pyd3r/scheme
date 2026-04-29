@@ -691,6 +691,66 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         return;
     }
 
+    if (is_symbol(fn, "let*")) {
+        word* ahdr = ptr_from_word(args);
+        word bindings = pair_car(ahdr);
+        word body_list = pair_cdr(ahdr);
+        // If no bindings: (let* () body ...) → (begin body ...)
+        if (is_nil(bindings)) {
+            if (is_ptr(pair_cdr(ptr_from_word(body_list))) &&
+                obj_type(ptr_from_word(pair_cdr(ptr_from_word(body_list)))) == OBJ_TYPE_PAIR) {
+                word* bsym = vm->gc->alloc_words(3 + 5); obj_set_type(bsym, OBJ_TYPE_SYMBOL);
+                bsym[DATA_START_INDEX] = (word)5;
+                for (int bi = 0; bi < 5; bi++) string_set(bsym, bi, word_from_char((unsigned char)"begin"[bi]));
+                word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+                pair_car(bp) = ptr_to_word(bsym); pair_cdr(bp) = body_list;
+                compile_expr_to_buf(buf, vm, ptr_to_word(bp), scope, env);
+            } else {
+                compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(body_list)), scope, env);
+            }
+            return;
+        }
+        // Single binding: (let* ((x v)) body) → (let ((x v)) body)
+        if (is_nil(pair_cdr(ptr_from_word(bindings)))) {
+            word* new_args = vm->gc->alloc_words(4); obj_set_type(new_args, OBJ_TYPE_PAIR);
+            pair_car(new_args) = bindings; pair_cdr(new_args) = body_list;
+            word* let_form = vm->gc->alloc_words(4); obj_set_type(let_form, OBJ_TYPE_PAIR);
+            pair_car(let_form) = fn; pair_cdr(let_form) = ptr_to_word(new_args);
+            // Actually call the 'let' handler — rewrite fn to "let"
+            word* ls_sym = vm->gc->alloc_words(3 + 3); obj_set_type(ls_sym, OBJ_TYPE_SYMBOL);
+            ls_sym[DATA_START_INDEX] = (word)3;
+            for (int li = 0; li < 3; li++) string_set(ls_sym, li, word_from_char((unsigned char)"let"[li]));
+            pair_car(let_form) = ptr_to_word(ls_sym);
+            compile_list(buf, vm, ptr_to_word(let_form), scope, env);
+            return;
+        }
+        // Multiple bindings: (let* ((x v1) (y v2)) body) → (let ((x v1)) (let* ((y v2)) body))
+        word first_binding = pair_car(ptr_from_word(bindings));
+        word rest_bindings = pair_cdr(ptr_from_word(bindings));
+        word* single_bindings = vm->gc->alloc_words(4); obj_set_type(single_bindings, OBJ_TYPE_PAIR);
+        pair_car(single_bindings) = first_binding; pair_cdr(single_bindings) = word_nil();
+        // Build (let* (rest) body)
+        word* rest_let_star_args = vm->gc->alloc_words(4); obj_set_type(rest_let_star_args, OBJ_TYPE_PAIR);
+        pair_car(rest_let_star_args) = rest_bindings; pair_cdr(rest_let_star_args) = body_list;
+        word* rest_let_star = vm->gc->alloc_words(4); obj_set_type(rest_let_star, OBJ_TYPE_PAIR);
+        pair_car(rest_let_star) = fn; pair_cdr(rest_let_star) = ptr_to_word(rest_let_star_args);
+        // Build inner body: ((let* (rest) body))
+        word* inner_body = vm->gc->alloc_words(4); obj_set_type(inner_body, OBJ_TYPE_PAIR);
+        pair_car(inner_body) = ptr_to_word(rest_let_star); pair_cdr(inner_body) = word_nil();
+        // Build: (let ((x v1)) (let* (rest) body))
+        word* let_bindings = vm->gc->alloc_words(4); obj_set_type(let_bindings, OBJ_TYPE_PAIR);
+        pair_car(let_bindings) = ptr_to_word(single_bindings);
+        pair_cdr(let_bindings) = ptr_to_word(inner_body);
+        word* let_form2 = vm->gc->alloc_words(4); obj_set_type(let_form2, OBJ_TYPE_PAIR);
+        word* ls_sym2 = vm->gc->alloc_words(3 + 3); obj_set_type(ls_sym2, OBJ_TYPE_SYMBOL);
+        ls_sym2[DATA_START_INDEX] = (word)3;
+        for (int li = 0; li < 3; li++) string_set(ls_sym2, li, word_from_char((unsigned char)"let"[li]));
+        pair_car(let_form2) = ptr_to_word(ls_sym2);
+        pair_cdr(let_form2) = ptr_to_word(let_bindings);
+        compile_list(buf, vm, ptr_to_word(let_form2), scope, env);
+        return;
+    }
+
     if (is_symbol(fn, "let")) {
         word* ahdr = ptr_from_word(args);
         word first = pair_car(ahdr);
