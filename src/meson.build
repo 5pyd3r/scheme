@@ -15,6 +15,8 @@ scheme_core_sources = files(
   'primitives/bytevector.c',
   'primitives/vector.c',
   'primitives/macro.c',
+  'primitives/base.c',
+  'primitives/list.c',
 )
 
 scheme_inc = include_directories('include')

@@ -820,6 +820,42 @@ word prim_gt(vm_state_t* vm, int nargs) {
     return word_true();
 }
 
+word prim_le(vm_state_t* vm, int nargs) {
+    bool has_flonum = false;
+    for (int i = 0; i < nargs; i++)
+        if (is_flonum(vm->sp[i])) { has_flonum = true; break; }
+    if (has_flonum) {
+        for (int i = 1; i < nargs; i++)
+            if (!(word_as_double(vm->sp[i-1]) <= word_as_double(vm->sp[i])))
+                return word_false();
+        return word_true();
+    }
+    for (int i = 1; i < nargs; i++) {
+        word a = promote_to_bignum(vm, vm->sp[i-1]);
+        word b = promote_to_bignum(vm, vm->sp[i]);
+        if (bignum_cmp(a, b) > 0) return word_false();
+    }
+    return word_true();
+}
+
+word prim_ge(vm_state_t* vm, int nargs) {
+    bool has_flonum = false;
+    for (int i = 0; i < nargs; i++)
+        if (is_flonum(vm->sp[i])) { has_flonum = true; break; }
+    if (has_flonum) {
+        for (int i = 1; i < nargs; i++)
+            if (!(word_as_double(vm->sp[i-1]) >= word_as_double(vm->sp[i])))
+                return word_false();
+        return word_true();
+    }
+    for (int i = 1; i < nargs; i++) {
+        word a = promote_to_bignum(vm, vm->sp[i-1]);
+        word b = promote_to_bignum(vm, vm->sp[i]);
+        if (bignum_cmp(a, b) < 0) return word_false();
+    }
+    return word_true();
+}
+
 word prim_eq_num(vm_state_t* vm, int nargs) {
     if (nargs < 2) { vm->error_kind = 1; return word_nil(); }
     bool has_flonum = false;

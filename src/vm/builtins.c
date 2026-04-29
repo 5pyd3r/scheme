@@ -19,6 +19,8 @@ word prim_mul(vm_state_t* vm, int nargs);
 word prim_div(vm_state_t* vm, int nargs);
 word prim_lt(vm_state_t* vm, int nargs);
 word prim_gt(vm_state_t* vm, int nargs);
+word prim_le(vm_state_t* vm, int nargs);
+word prim_ge(vm_state_t* vm, int nargs);
 word prim_eq_num(vm_state_t* vm, int nargs);
 word prim_display(vm_state_t* vm, int nargs);
 word prim_newline(vm_state_t* vm, int nargs);
@@ -109,6 +111,23 @@ word prim_gensym(vm_state_t* vm, int nargs);
 word prim_eval(vm_state_t* vm, int nargs);
 word prim_string_to_symbol(vm_state_t* vm, int nargs);
 word prim_string_append(vm_state_t* vm, int nargs);
+word prim_not(vm_state_t* vm, int nargs);
+word prim_booleanp(vm_state_t* vm, int nargs);
+word prim_procedurep(vm_state_t* vm, int nargs);
+word prim_error(vm_state_t* vm, int nargs);
+word prim_write(vm_state_t* vm, int nargs);
+word prim_substring(vm_state_t* vm, int nargs);
+word prim_string_copy(vm_state_t* vm, int nargs);
+word prim_apply(vm_state_t* vm, int nargs);
+word prim_length(vm_state_t* vm, int nargs);
+word prim_listp(vm_state_t* vm, int nargs);
+word prim_list_ref(vm_state_t* vm, int nargs);
+word prim_list_tail(vm_state_t* vm, int nargs);
+word prim_reverse(vm_state_t* vm, int nargs);
+word prim_append(vm_state_t* vm, int nargs);
+word prim_memq(vm_state_t* vm, int nargs);
+word prim_member(vm_state_t* vm, int nargs);
+word prim_assq(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
@@ -218,6 +237,8 @@ static prim_entry_t prim_table[] = {
     {"/",        prim_div},
     {"<",        prim_lt},
     {">",        prim_gt},
+    {"<=",       prim_le},
+    {">=",       prim_ge},
     {"=",        prim_eq_num},
     {"display",  prim_display},
     {"newline",  prim_newline},
@@ -306,6 +327,23 @@ static prim_entry_t prim_table[] = {
     {"u8-list->bytevector",   prim_u8_list_to_bytevector},
     {"gensym",           prim_gensym},
     {"eval",             prim_eval},
+    {"not",              prim_not},
+    {"boolean?",         prim_booleanp},
+    {"procedure?",       prim_procedurep},
+    {"error",            prim_error},
+    {"write",            prim_write},
+    {"substring",        prim_substring},
+    {"string-copy",      prim_string_copy},
+    {"apply",            prim_apply},
+    {"length",           prim_length},
+    {"list?",            prim_listp},
+    {"list-ref",         prim_list_ref},
+    {"list-tail",        prim_list_tail},
+    {"reverse",          prim_reverse},
+    {"append",           prim_append},
+    {"memq",             prim_memq},
+    {"member",           prim_member},
+    {"assq",             prim_assq},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 
