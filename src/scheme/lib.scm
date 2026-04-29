@@ -364,6 +364,9 @@
 
 ;; TODO: letrec — requires multi-variable ellipsis in pattern matcher,
 ;; plus set! updating captured closure copies (flat closure model limitation).
+;; TODO: case, do — case needs non-recursive multi-clause expansion
+;; (requires either C compiler special form or recursive _expand-once).
+;; do requires multi-variable ellipsis (like letrec).
 
 (define-syntax when
   (syntax-rules () '(((_ test body ...) (if test (begin body ...))))))
