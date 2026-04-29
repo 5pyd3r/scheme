@@ -56,3 +56,26 @@ word prim_char_ge(vm_state_t* vm, int nargs) {
     if (!is_char(a) || !is_char(b)) { vm->error_kind = 1; return word_nil(); }
     return word_to_char(a) >= word_to_char(b) ? word_true() : word_false();
 }
+
+word prim_char_upcase(vm_state_t* vm, int nargs) {
+    if (nargs != 1 || !is_char(vm->sp[0])) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    char c = (char)word_to_char(vm->sp[0]);
+    if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+    return word_from_char((unsigned char)c);
+}
+
+word prim_char_downcase(vm_state_t* vm, int nargs) {
+    if (nargs != 1 || !is_char(vm->sp[0])) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    char c = (char)word_to_char(vm->sp[0]);
+    if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    return word_from_char((unsigned char)c);
+}
+
+word prim_digit_value(vm_state_t* vm, int nargs) {
+    if (nargs != 1 || !is_char(vm->sp[0])) { vm->error_kind = ERR_ARITY; return word_false(); }
+    char c = (char)word_to_char(vm->sp[0]);
+    if (c >= '0' && c <= '9') return word_from_fixnum(c - '0');
+    if (c >= 'a' && c <= 'f') return word_from_fixnum(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return word_from_fixnum(c - 'A' + 10);
+    return word_false();
+}

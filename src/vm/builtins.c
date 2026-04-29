@@ -128,6 +128,43 @@ word prim_append(vm_state_t* vm, int nargs);
 word prim_memq(vm_state_t* vm, int nargs);
 word prim_member(vm_state_t* vm, int nargs);
 word prim_assq(vm_state_t* vm, int nargs);
+word prim_make_list(vm_state_t* vm, int nargs);
+word prim_list_set(vm_state_t* vm, int nargs);
+word prim_list_copy(vm_state_t* vm, int nargs);
+word prim_memv(vm_state_t* vm, int nargs);
+word prim_assv(vm_state_t* vm, int nargs);
+word prim_assoc(vm_state_t* vm, int nargs);
+word prim_expt(vm_state_t* vm, int nargs);
+word prim_string_gt(vm_state_t* vm, int nargs);
+word prim_string_le(vm_state_t* vm, int nargs);
+word prim_string_ge(vm_state_t* vm, int nargs);
+word prim_string_fill(vm_state_t* vm, int nargs);
+word prim_vector_copy(vm_state_t* vm, int nargs);
+word prim_vector_fill(vm_state_t* vm, int nargs);
+word prim_vector_append(vm_state_t* vm, int nargs);
+word prim_bytevector_copy(vm_state_t* vm, int nargs);
+word prim_symbol_eq(vm_state_t* vm, int nargs);
+word prim_boolean_eq(vm_state_t* vm, int nargs);
+word prim_eof_objectp(vm_state_t* vm, int nargs);
+word prim_char_upcase(vm_state_t* vm, int nargs);
+word prim_char_downcase(vm_state_t* vm, int nargs);
+word prim_digit_value(vm_state_t* vm, int nargs);
+
+// caar..cddddr
+word prim_caar(vm_state_t*,int); word prim_cadr(vm_state_t*,int);
+word prim_cdar(vm_state_t*,int); word prim_cddr(vm_state_t*,int);
+word prim_caaar(vm_state_t*,int); word prim_caadr(vm_state_t*,int);
+word prim_cadar(vm_state_t*,int); word prim_caddr(vm_state_t*,int);
+word prim_cdaar(vm_state_t*,int); word prim_cdadr(vm_state_t*,int);
+word prim_cddar(vm_state_t*,int); word prim_cdddr(vm_state_t*,int);
+word prim_caaaar(vm_state_t*,int); word prim_caaadr(vm_state_t*,int);
+word prim_caadar(vm_state_t*,int); word prim_caaddr(vm_state_t*,int);
+word prim_cadaar(vm_state_t*,int); word prim_cadadr(vm_state_t*,int);
+word prim_caddar(vm_state_t*,int); word prim_cadddr(vm_state_t*,int);
+word prim_cdaaar(vm_state_t*,int); word prim_cdaadr(vm_state_t*,int);
+word prim_cdadar(vm_state_t*,int); word prim_cdaddr(vm_state_t*,int);
+word prim_cddaar(vm_state_t*,int); word prim_cddadr(vm_state_t*,int);
+word prim_cdddar(vm_state_t*,int); word prim_cddddr(vm_state_t*,int);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
@@ -344,6 +381,41 @@ static prim_entry_t prim_table[] = {
     {"memq",             prim_memq},
     {"member",           prim_member},
     {"assq",             prim_assq},
+    {"assv",             prim_assv},
+    {"assoc",            prim_assoc},
+    {"memv",             prim_memv},
+    {"make-list",        prim_make_list},
+    {"list-set!",        prim_list_set},
+    {"list-copy",        prim_list_copy},
+    {"string>?",         prim_string_gt},
+    {"string<=?",        prim_string_le},
+    {"string>=?",        prim_string_ge},
+    {"string-fill!",     prim_string_fill},
+    {"vector-copy",      prim_vector_copy},
+    {"vector-fill!",     prim_vector_fill},
+    {"vector-append",    prim_vector_append},
+    {"bytevector-copy",  prim_bytevector_copy},
+    {"expt",             prim_expt},
+    {"symbol=?",         prim_symbol_eq},
+    {"boolean=?",        prim_boolean_eq},
+    {"eof-object?",      prim_eof_objectp},
+    {"char-upcase",      prim_char_upcase},
+    {"char-downcase",    prim_char_downcase},
+    {"digit-value",      prim_digit_value},
+    {"caar",  prim_caar}, {"cadr", prim_cadr},
+    {"cdar",  prim_cdar}, {"cddr", prim_cddr},
+    {"caaar", prim_caaar}, {"caadr", prim_caadr},
+    {"cadar", prim_cadar}, {"caddr", prim_caddr},
+    {"cdaar", prim_cdaar}, {"cdadr", prim_cdadr},
+    {"cddar", prim_cddar}, {"cdddr", prim_cdddr},
+    {"caaaar",prim_caaaar},{"caaadr",prim_caaadr},
+    {"caadar",prim_caadar},{"caaddr",prim_caaddr},
+    {"cadaar",prim_cadaar},{"cadadr",prim_cadadr},
+    {"caddar",prim_caddar},{"cadddr",prim_cadddr},
+    {"cdaaar",prim_cdaaar},{"cdaadr",prim_cdaadr},
+    {"cdadar",prim_cdadar},{"cdaddr",prim_cdaddr},
+    {"cddaar",prim_cddaar},{"cddadr",prim_cddadr},
+    {"cdddar",prim_cdddar},{"cddddr",prim_cddddr},
 };
 #define NUM_PRIMS (sizeof(prim_table) / sizeof(prim_table[0]))
 

@@ -88,3 +88,26 @@ word prim_equal(vm_state_t* vm, int nargs) {
     if (nargs != 2) { vm->error_kind = 1; return word_nil(); }
     return equal_rec(vm, vm->sp[0], vm->sp[1]) ? word_true() : word_false();
 }
+
+// === caar..cddddr (2-level) ===
+#define CXR2(name,a,b) word name(vm_state_t* vm, int na){if(na!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_##b(ptr_from_word(pair_##a(p)));}
+CXR2(prim_caar,car,car) CXR2(prim_cadr,cdr,car) CXR2(prim_cdar,car,cdr) CXR2(prim_cddr,cdr,cdr)
+// 3-level
+word prim_caaar(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_car(ptr_from_word(pair_car(ptr_from_word(pair_car(p)))));}
+word prim_caadr(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_cdr(ptr_from_word(pair_car(ptr_from_word(pair_car(p)))));}
+word prim_cadar(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_car(ptr_from_word(pair_cdr(ptr_from_word(pair_car(p)))));}
+word prim_caddr(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_cdr(ptr_from_word(pair_cdr(ptr_from_word(pair_car(p)))));}
+word prim_cdaar(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_car(ptr_from_word(pair_car(ptr_from_word(pair_cdr(p)))));}
+word prim_cdadr(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_cdr(ptr_from_word(pair_car(ptr_from_word(pair_cdr(p)))));}
+word prim_cddar(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_car(ptr_from_word(pair_cdr(ptr_from_word(pair_cdr(p)))));}
+word prim_cdddr(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_cdr(ptr_from_word(pair_cdr(ptr_from_word(pair_cdr(p)))));}
+// 4-level (16 functions)
+#define CXR4(name,a,b,c,d) word name(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=ptr_from_word(vm->sp[0]);return pair_##d(ptr_from_word(pair_##c(ptr_from_word(pair_##b(ptr_from_word(pair_##a(p)))))));}
+CXR4(prim_caaaar,car,car,car,car) CXR4(prim_caaadr,car,car,car,cdr)
+CXR4(prim_caadar,car,car,cdr,car) CXR4(prim_caaddr,car,car,cdr,cdr)
+CXR4(prim_cadaar,car,cdr,car,car) CXR4(prim_cadadr,car,cdr,car,cdr)
+CXR4(prim_caddar,car,cdr,cdr,car) CXR4(prim_cadddr,car,cdr,cdr,cdr)
+CXR4(prim_cdaaar,cdr,car,car,car) CXR4(prim_cdaadr,cdr,car,car,cdr)
+CXR4(prim_cdadar,cdr,car,cdr,car) CXR4(prim_cdaddr,cdr,car,cdr,cdr)
+CXR4(prim_cddaar,cdr,cdr,car,car) CXR4(prim_cddadr,cdr,cdr,car,cdr)
+CXR4(prim_cdddar,cdr,cdr,cdr,car) CXR4(prim_cddddr,cdr,cdr,cdr,cdr)

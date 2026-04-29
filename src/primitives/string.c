@@ -176,3 +176,68 @@ word prim_string_append(vm_state_t* vm, int nargs) {
     }
     return ptr_to_word(result);
 }
+
+word prim_string_gt(vm_state_t* vm, int nargs) {
+    if (nargs < 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    for (int i = 1; i < nargs; i++) {
+        word* ha = ptr_from_word(vm->sp[i-1]), *hb = ptr_from_word(vm->sp[i]);
+        size_t la = string_length(ha), lb = string_length(hb);
+        size_t n = la < lb ? la : lb;
+        int cmp = 0;
+        for (size_t j = 0; j < n; j++) {
+            uint32_t ca = word_to_char(string_ref(ha, j));
+            uint32_t cb = word_to_char(string_ref(hb, j));
+            if (ca != cb) { cmp = ca < cb ? -1 : 1; break; }
+        }
+        if (cmp == 0) cmp = (la < lb) ? -1 : (la > lb) ? 1 : 0;
+        if (cmp <= 0) return word_false();
+    }
+    return word_true();
+}
+
+word prim_string_le(vm_state_t* vm, int nargs) {
+    if (nargs < 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    for (int i = 1; i < nargs; i++) {
+        word* ha = ptr_from_word(vm->sp[i-1]), *hb = ptr_from_word(vm->sp[i]);
+        size_t la = string_length(ha), lb = string_length(hb);
+        size_t n = la < lb ? la : lb;
+        int cmp = 0;
+        for (size_t j = 0; j < n; j++) {
+            uint32_t ca = word_to_char(string_ref(ha, j));
+            uint32_t cb = word_to_char(string_ref(hb, j));
+            if (ca != cb) { cmp = ca < cb ? -1 : 1; break; }
+        }
+        if (cmp == 0) cmp = (la < lb) ? -1 : (la > lb) ? 1 : 0;
+        if (cmp > 0) return word_false();
+    }
+    return word_true();
+}
+
+word prim_string_ge(vm_state_t* vm, int nargs) {
+    if (nargs < 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    for (int i = 1; i < nargs; i++) {
+        word* ha = ptr_from_word(vm->sp[i-1]), *hb = ptr_from_word(vm->sp[i]);
+        size_t la = string_length(ha), lb = string_length(hb);
+        size_t n = la < lb ? la : lb;
+        int cmp = 0;
+        for (size_t j = 0; j < n; j++) {
+            uint32_t ca = word_to_char(string_ref(ha, j));
+            uint32_t cb = word_to_char(string_ref(hb, j));
+            if (ca != cb) { cmp = ca < cb ? -1 : 1; break; }
+        }
+        if (cmp == 0) cmp = (la < lb) ? -1 : (la > lb) ? 1 : 0;
+        if (cmp < 0) return word_false();
+    }
+    return word_true();
+}
+
+word prim_string_fill(vm_state_t* vm, int nargs) {
+    if (nargs != 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word sw = vm->sp[1], cv = vm->sp[0];
+    if (!is_ptr(sw) || obj_type(ptr_from_word(sw)) != OBJ_TYPE_STRING || !is_char(cv))
+        { vm->error_kind = ERR_TYPE; return word_nil(); }
+    word* hdr = ptr_from_word(sw);
+    size_t len = string_length(hdr);
+    for (size_t i = 0; i < len; i++) string_set(hdr, i, cv);
+    return word_nil();
+}

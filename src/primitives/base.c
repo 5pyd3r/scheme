@@ -135,3 +135,22 @@ word prim_apply(vm_state_t* vm, int nargs) {
     vm->error_msg = "apply: not yet implemented";
     return word_nil();
 }
+
+word prim_symbol_eq(vm_state_t* vm, int nargs) {
+    if (nargs < 2) { vm->error_kind = ERR_ARITY; return word_false(); }
+    for (int i = 1; i < nargs; i++)
+        if (vm->sp[i-1] != vm->sp[i]) return word_false();
+    return word_true();
+}
+
+word prim_boolean_eq(vm_state_t* vm, int nargs) {
+    if (nargs < 2) { vm->error_kind = ERR_ARITY; return word_false(); }
+    for (int i = 1; i < nargs; i++)
+        if (vm->sp[i-1] != vm->sp[i]) return word_false();
+    return word_true();
+}
+
+word prim_eof_objectp(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_false(); }
+    return is_eof(vm->sp[0]) ? word_true() : word_false();
+}

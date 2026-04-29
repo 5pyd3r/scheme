@@ -117,3 +117,18 @@ word prim_u8_list_to_bytevector(vm_state_t* vm, int nargs) {
     }
     return ptr_to_word(bv);
 }
+
+word prim_bytevector_copy(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word bw = vm->sp[0];
+    if (!is_ptr(bw) || obj_type(ptr_from_word(bw)) != OBJ_TYPE_BYTEVECTOR)
+        { vm->error_kind = ERR_TYPE; return word_nil(); }
+    word* hdr = ptr_from_word(bw);
+    size_t len = (size_t)hdr[DATA_START_INDEX];
+    size_t nwords = 3 + (len + sizeof(word) - 1) / sizeof(word);
+    word* nv = vm->gc->alloc_words(nwords);
+    obj_set_type(nv, OBJ_TYPE_BYTEVECTOR);
+    nv[DATA_START_INDEX] = (word)len;
+    memcpy(bytevector_data(nv), bytevector_data(hdr), len);
+    return ptr_to_word(nv);
+}

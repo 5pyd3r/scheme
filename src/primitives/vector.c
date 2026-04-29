@@ -127,3 +127,55 @@ word prim_vector_to_list(vm_state_t* vm, int nargs) {
     }
     return result;
 }
+
+word prim_vector_copy(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word vw = vm->sp[0];
+    if (!is_ptr(vw) || obj_type(ptr_from_word(vw)) != OBJ_TYPE_VECTOR)
+        { vm->error_kind = ERR_TYPE; return word_nil(); }
+    word* hdr = ptr_from_word(vw);
+    size_t len = (size_t)hdr[DATA_START_INDEX];
+    word* nv = vm->gc->alloc_words(3 + len);
+    obj_set_type(nv, OBJ_TYPE_VECTOR);
+    nv[DATA_START_INDEX] = (word)len;
+    for (size_t i = 0; i < len; i++)
+        nv[DATA_START_INDEX + 1 + i] = hdr[DATA_START_INDEX + 1 + i];
+    return ptr_to_word(nv);
+}
+
+word prim_vector_fill(vm_state_t* vm, int nargs) {
+    if (nargs != 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word vw = vm->sp[0], val = vm->sp[1];
+    if (!is_ptr(vw) || obj_type(ptr_from_word(vw)) != OBJ_TYPE_VECTOR)
+        { vm->error_kind = ERR_TYPE; return word_nil(); }
+    word* hdr = ptr_from_word(vw);
+    size_t len = (size_t)hdr[DATA_START_INDEX];
+    for (size_t i = 0; i < len; i++)
+        hdr[DATA_START_INDEX + 1 + i] = val;
+    return word_nil();
+}
+
+word prim_vector_append(vm_state_t* vm, int nargs) {
+    if (nargs == 0) {
+        word* nv = vm->gc->alloc_words(3); obj_set_type(nv, OBJ_TYPE_VECTOR);
+        nv[DATA_START_INDEX] = (word)0; return ptr_to_word(nv);
+    }
+    size_t total = 0;
+    for (int i = 0; i < nargs; i++) {
+        word vw = vm->sp[i];
+        if (!is_ptr(vw) || obj_type(ptr_from_word(vw)) != OBJ_TYPE_VECTOR)
+            { vm->error_kind = ERR_TYPE; return word_nil(); }
+        total += (size_t)ptr_from_word(vw)[DATA_START_INDEX];
+    }
+    word* nv = vm->gc->alloc_words(3 + total);
+    obj_set_type(nv, OBJ_TYPE_VECTOR);
+    nv[DATA_START_INDEX] = (word)total;
+    size_t pos = 0;
+    for (int i = 0; i < nargs; i++) {
+        word* hdr = ptr_from_word(vm->sp[i]);
+        size_t len = (size_t)hdr[DATA_START_INDEX];
+        for (size_t j = 0; j < len; j++)
+            nv[DATA_START_INDEX + 1 + pos++] = hdr[DATA_START_INDEX + 1 + j];
+    }
+    return ptr_to_word(nv);
+}

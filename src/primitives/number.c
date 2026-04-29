@@ -1343,3 +1343,12 @@ word prim_nanp(vm_state_t* vm, int nargs) {
     if (nargs != 1 || !is_flonum(vm->sp[0])) return word_false();
     return isnan(word_to_double(vm->sp[0])) ? word_true() : word_false();
 }
+
+word prim_expt(vm_state_t* vm, int nargs) {
+    if (nargs != 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    // Simple implementation for integer exponents
+    double base = word_as_double(vm->sp[0]);
+    double exp_val = word_as_double(vm->sp[1]);
+    double result = pow(base, exp_val);
+    return word_from_double(vm, result);
+}

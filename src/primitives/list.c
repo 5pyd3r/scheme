@@ -129,3 +129,84 @@ word prim_assq(vm_state_t* vm, int nargs) {
     }
     return word_false();
 }
+
+word prim_make_list(vm_state_t* vm, int nargs) {
+    if (nargs < 1 || nargs > 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    int64_t k = word_to_fixnum(vm->sp[nargs - 1]);
+    word fill = (nargs == 2) ? vm->sp[0] : word_nil();
+    word result = word_nil();
+    for (int64_t i = 0; i < k; i++) {
+        word* p = vm->gc->alloc_words(4); obj_set_type(p, OBJ_TYPE_PAIR);
+        pair_car(p) = fill; pair_cdr(p) = result;
+        result = ptr_to_word(p);
+    }
+    return result;
+}
+
+word prim_list_set(vm_state_t* vm, int nargs) {
+    if (nargs != 3) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word lst = vm->sp[0];
+    int64_t k = word_to_fixnum(vm->sp[1]);
+    word val = vm->sp[2];
+    word cur = lst;
+    for (int64_t i = 0; i < k; i++) {
+        if (!is_ptr(cur) || obj_type(ptr_from_word(cur)) != OBJ_TYPE_PAIR)
+            { vm->error_kind = ERR_TYPE; return word_nil(); }
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    pair_car(ptr_from_word(cur)) = val;
+    return word_nil();
+}
+
+word prim_list_copy(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word cur = vm->sp[0];
+    word result = word_nil();
+    word* prev = NULL;
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word* p = vm->gc->alloc_words(4); obj_set_type(p, OBJ_TYPE_PAIR);
+        pair_car(p) = pair_car(ptr_from_word(cur));
+        pair_cdr(p) = word_nil();
+        if (prev) pair_cdr(prev) = ptr_to_word(p);
+        else result = ptr_to_word(p);
+        prev = p;
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    return result;
+}
+
+word prim_memv(vm_state_t* vm, int nargs) {
+    if (nargs != 2) { vm->error_kind = ERR_ARITY; return word_false(); }
+    word key = vm->sp[0], cur = vm->sp[1];
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word val = pair_car(ptr_from_word(cur));
+        if (val == key) return cur;  // eqv? for same immediate values
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    return word_false();
+}
+
+word prim_assv(vm_state_t* vm, int nargs) {
+    if (nargs != 2) { vm->error_kind = ERR_ARITY; return word_false(); }
+    word key = vm->sp[0], cur = vm->sp[1];
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word entry = pair_car(ptr_from_word(cur));
+        if (is_ptr(entry) && obj_type(ptr_from_word(entry)) == OBJ_TYPE_PAIR)
+            if (pair_car(ptr_from_word(entry)) == key) return entry;
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    return word_false();
+}
+
+word prim_assoc(vm_state_t* vm, int nargs) {
+    // assoc uses equal? but we approximate with eqv? for now
+    if (nargs != 2) { vm->error_kind = ERR_ARITY; return word_false(); }
+    word key = vm->sp[0], cur = vm->sp[1];
+    while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+        word entry = pair_car(ptr_from_word(cur));
+        if (is_ptr(entry) && obj_type(ptr_from_word(entry)) == OBJ_TYPE_PAIR)
+            if (pair_car(ptr_from_word(entry)) == key) return entry;
+        cur = pair_cdr(ptr_from_word(cur));
+    }
+    return word_false();
+}
