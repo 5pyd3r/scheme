@@ -146,6 +146,9 @@ word prim_bytevector_copy(vm_state_t* vm, int nargs);
 word prim_symbol_eq(vm_state_t* vm, int nargs);
 word prim_boolean_eq(vm_state_t* vm, int nargs);
 word prim_eof_objectp(vm_state_t* vm, int nargs);
+word prim_read_char(vm_state_t* vm, int nargs);
+word prim_write_char(vm_state_t* vm, int nargs);
+word prim_peek_char(vm_state_t* vm, int nargs);
 word prim_char_upcase(vm_state_t* vm, int nargs);
 word prim_char_downcase(vm_state_t* vm, int nargs);
 word prim_digit_value(vm_state_t* vm, int nargs);
@@ -399,6 +402,9 @@ static prim_entry_t prim_table[] = {
     {"symbol=?",         prim_symbol_eq},
     {"boolean=?",        prim_boolean_eq},
     {"eof-object?",      prim_eof_objectp},
+    {"read-char",        prim_read_char},
+    {"write-char",       prim_write_char},
+    {"peek-char",        prim_peek_char},
     {"char-upcase",      prim_char_upcase},
     {"char-downcase",    prim_char_downcase},
     {"digit-value",      prim_digit_value},

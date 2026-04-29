@@ -154,3 +154,22 @@ word prim_eof_objectp(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_false(); }
     return is_eof(vm->sp[0]) ? word_true() : word_false();
 }
+
+word prim_read_char(vm_state_t* vm, int nargs) {
+    int c = getchar();
+    if (c == EOF) return word_eof();
+    return word_from_char((unsigned char)c);
+}
+
+word prim_write_char(vm_state_t* vm, int nargs) {
+    if (nargs != 1 || !is_char(vm->sp[0])) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    putchar((char)word_to_char(vm->sp[0]));
+    return word_nil();
+}
+
+word prim_peek_char(vm_state_t* vm, int nargs) {
+    int c = getchar();
+    if (c == EOF) return word_eof();
+    ungetc(c, stdin);
+    return word_from_char((unsigned char)c);
+}
