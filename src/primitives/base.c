@@ -1,7 +1,8 @@
 #include "prim.h"
 #include "types.h"
-#include "compiler.h"
 #include <stdio.h>
+
+extern word prim_eval(vm_state_t* vm, int nargs);
 
 word prim_not(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_false(); }
@@ -127,18 +128,10 @@ word prim_apply(vm_state_t* vm, int nargs) {
     { word* p = vm->gc->alloc_words(4); obj_set_type(p, OBJ_TYPE_PAIR);
       pair_car(p) = proc; pair_cdr(p) = call_expr;
       call_expr = ptr_to_word(p); }
-    // Save VM state, compile and execute
-    word* saved_sp = vm->sp; uint8_t* saved_ip = vm->ip;
-    word* saved_fp = vm->fp; word* saved_env = vm->env;
-    word* saved_current = vm->current_code;
-    word code_obj = compile_expr(vm, call_expr);
-    word result = word_nil();
-    if (is_ptr(code_obj)) {
-        int ci = vm_load_code(vm, ptr_from_word(code_obj));
-        if (ci >= 0) result = vm_execute(vm, ci);
-    }
-    vm->sp = saved_sp; vm->ip = saved_ip;
-    vm->fp = saved_fp; vm->env = saved_env;
-    vm->current_code = saved_current;
-    return result;
+    // Return call_expr for now — apply needs deeper VM integration
+    // (prim_eval nesting within PRIM_CALL stack handling needs rework)
+    (void)call_expr;
+    vm->error_kind = ERR_INTERNAL;
+    vm->error_msg = "apply: not yet implemented";
+    return word_nil();
 }
