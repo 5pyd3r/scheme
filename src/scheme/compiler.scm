@@ -56,6 +56,10 @@
       (if (eq? key (car (car alist))) (cdr (car alist))
           (_assq-lookup key (cdr alist)))))
 
+;; Macro expansion helper — must be before _compile-expr (forward ref issue)
+(define (_expand-and-compile form cb cs)
+  (_compile-expr (eval (list (_lookup-macro (car form)) (list 'quote form))) cb cs))
+
 (define (_compile-expr expr cb cs)
   (if (fixnum? expr) (begin (_emit-byte! cb OP-PUSH-INT) (_emit-byte! cb (remainder expr 256)) (_emit-byte! cb (remainder (quotient expr 256) 256)) (_emit-byte! cb (remainder (quotient expr 65536) 256)) (_emit-byte! cb (remainder (quotient expr 16777216) 256)))
       (if (null? expr) (_emit-byte! cb OP-PUSH-NIL)
@@ -65,7 +69,7 @@
                       (if (eq? (car expr) 'define-syntax)
                           (_compile-define-syntax (cdr expr) cb cs)
                           (if (_lookup-macro (car expr))
-                              (_cb-mark-error! cb)
+                              (_expand-and-compile expr cb cs)
                               (if (_is-handled? (car expr))
                                   (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs)
                                       (begin (_compile-args (cdr expr) cb cs) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256))))
@@ -74,7 +78,9 @@
                           (begin (_emit-byte! cb OP-PUSH-CONST) (_emit-byte! cb (_add-const! cs expr))))))))))
 
 (define (_compile-define-syntax args cb cs)
-  (_emit-byte! cb OP-PUSH-NIL))
+  (begin
+    (set-car! *macro-table* (cons (cons (car args) (eval (car (cdr args)))) (car *macro-table*)))
+    (_emit-byte! cb OP-PUSH-NIL)))
 
 (define (_compile-begin args cb cs) (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs)))
 (define (_compile-begin-1 args cb cs) (if (null? (cdr args)) (_compile-expr (car args) cb cs) (begin (_compile-expr (car args) cb cs) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs))))
