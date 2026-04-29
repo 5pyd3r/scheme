@@ -33,3 +33,19 @@ word prim_prim_index(vm_state_t* vm, int nargs) {
     if (idx < 0) return word_false();
     return word_from_fixnum(idx);
 }
+
+word prim_string_to_symbol(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = 1; return word_nil(); }
+    word sw = vm->sp[0];
+    if (!is_ptr(sw) || obj_type(ptr_from_word(sw)) != OBJ_TYPE_STRING) {
+        vm->error_kind = 1; return word_nil();
+    }
+    word* hdr = ptr_from_word(sw);
+    int len = (int)string_length(hdr);
+    if (len >= 255) return word_nil();
+    char name[256];
+    for (int i = 0; i < len; i++)
+        name[i] = (char)word_to_char(string_ref(hdr, i));
+    name[len] = '\0';
+    return vm_intern(vm, name, len);
+}

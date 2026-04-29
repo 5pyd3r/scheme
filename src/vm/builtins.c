@@ -107,6 +107,8 @@ word prim_bytevector_to_u8_list(vm_state_t* vm, int nargs);
 word prim_u8_list_to_bytevector(vm_state_t* vm, int nargs);
 word prim_gensym(vm_state_t* vm, int nargs);
 word prim_eval(vm_state_t* vm, int nargs);
+word prim_string_to_symbol(vm_state_t* vm, int nargs);
+word prim_string_append(vm_state_t* vm, int nargs);
 
 word prim_assemble_code(vm_state_t* vm, int nargs) {
     if (nargs != 1) { vm->error_kind = 1; return word_from_fixnum(-1); }
@@ -220,6 +222,7 @@ static prim_entry_t prim_table[] = {
     {"display",  prim_display},
     {"newline",  prim_newline},
     {"symbol->string", prim_symbol_to_string},
+    {"string->symbol", prim_string_to_symbol},
     {"prim-index",     prim_prim_index},
     {"assemble-code",  prim_assemble_code},
     {"read",           prim_read},
@@ -292,6 +295,7 @@ static prim_entry_t prim_table[] = {
     {"string<?",          prim_string_lt},
     {"string->list",      prim_string_to_list},
     {"list->string",      prim_list_to_string},
+    {"string-append",     prim_string_append},
     {"bytevector?",           prim_bytevectorp},
     {"make-bytevector",       prim_make_bytevector},
     {"bytevector",            prim_bytevector},

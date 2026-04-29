@@ -148,3 +148,31 @@ word prim_list_to_string(vm_state_t* vm, int nargs) {
     }
     return ptr_to_word(str);
 }
+
+word prim_string_append(vm_state_t* vm, int nargs) {
+    if (nargs == 0) {
+        word* s = vm->gc->alloc_words(3);
+        obj_set_type(s, OBJ_TYPE_STRING);
+        s[DATA_START_INDEX] = (word)0;
+        return ptr_to_word(s);
+    }
+    size_t total = 0;
+    for (int i = 0; i < nargs; i++) {
+        word sw = vm->sp[i];
+        if (!is_ptr(sw) || obj_type(ptr_from_word(sw)) != OBJ_TYPE_STRING)
+            { vm->error_kind = 1; return word_nil(); }
+        total += string_length(ptr_from_word(sw));
+    }
+    size_t words = 3 + total;
+    word* result = vm->gc->alloc_words(words);
+    obj_set_type(result, OBJ_TYPE_STRING);
+    result[DATA_START_INDEX] = (word)total;
+    size_t pos = 0;
+    for (int i = 0; i < nargs; i++) {
+        word* hdr = ptr_from_word(vm->sp[i]);
+        size_t len = string_length(hdr);
+        for (size_t j = 0; j < len; j++)
+            string_set(result, pos++, string_ref(hdr, j));
+    }
+    return ptr_to_word(result);
+}

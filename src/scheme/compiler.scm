@@ -218,7 +218,8 @@
 (define (_append-alist a b)
   (if (null? a) b (cons (car a) (_append-alist (cdr a) b))))
 
-(define (_rename-sym sym rename-id) sym)
+(define (_rename-sym sym rename-id)
+  (string->symbol (string-append (symbol->string sym) "{M" (number->string rename-id) "}")))
 
 (define (_fill-template tmpl bindings rename-id)
   (if (symbol? tmpl)
