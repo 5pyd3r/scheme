@@ -109,20 +109,20 @@ static word* cxr_check(vm_state_t* vm, word w) {
 CXR2(prim_caar,car,car) CXR2(prim_cadr,cdr,car) CXR2(prim_cdar,car,cdr) CXR2(prim_cddr,cdr,cdr)
 // 3-level
 word prim_caaar(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_car(ptr_from_word(pair_car(ptr_from_word(pair_car(p)))));}
-word prim_caadr(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_cdr(ptr_from_word(pair_car(ptr_from_word(pair_car(p)))));}
+word prim_caadr(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_car(ptr_from_word(pair_car(ptr_from_word(pair_cdr(p)))));}
 word prim_cadar(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_car(ptr_from_word(pair_cdr(ptr_from_word(pair_car(p)))));}
-word prim_caddr(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_cdr(ptr_from_word(pair_cdr(ptr_from_word(pair_car(p)))));}
-word prim_cdaar(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_car(ptr_from_word(pair_car(ptr_from_word(pair_cdr(p)))));}
+word prim_caddr(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_car(ptr_from_word(pair_cdr(ptr_from_word(pair_cdr(p)))));}
+word prim_cdaar(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_cdr(ptr_from_word(pair_car(ptr_from_word(pair_car(p)))));}
 word prim_cdadr(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_cdr(ptr_from_word(pair_car(ptr_from_word(pair_cdr(p)))));}
-word prim_cddar(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_car(ptr_from_word(pair_cdr(ptr_from_word(pair_cdr(p)))));}
+word prim_cddar(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_cdr(ptr_from_word(pair_cdr(ptr_from_word(pair_car(p)))));}
 word prim_cdddr(vm_state_t* vm,int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_cdr(ptr_from_word(pair_cdr(ptr_from_word(pair_cdr(p)))));}
 // 4-level (16 functions)
 #define CXR4(name,a,b,c,d) word name(vm_state_t* vm, int n){if(n!=1){vm->error_kind=ERR_ARITY;return word_nil();}word* p=cxr_check(vm,vm->sp[0]);if(!p)return word_nil();return pair_##d(ptr_from_word(pair_##c(ptr_from_word(pair_##b(ptr_from_word(pair_##a(p)))))));}
-CXR4(prim_caaaar,car,car,car,car) CXR4(prim_caaadr,car,car,car,cdr)
-CXR4(prim_caadar,car,car,cdr,car) CXR4(prim_caaddr,car,car,cdr,cdr)
-CXR4(prim_cadaar,car,cdr,car,car) CXR4(prim_cadadr,car,cdr,car,cdr)
-CXR4(prim_caddar,car,cdr,cdr,car) CXR4(prim_cadddr,car,cdr,cdr,cdr)
-CXR4(prim_cdaaar,cdr,car,car,car) CXR4(prim_cdaadr,cdr,car,car,cdr)
-CXR4(prim_cdadar,cdr,car,cdr,car) CXR4(prim_cdaddr,cdr,car,cdr,cdr)
-CXR4(prim_cddaar,cdr,cdr,car,car) CXR4(prim_cddadr,cdr,cdr,car,cdr)
-CXR4(prim_cdddar,cdr,cdr,cdr,car) CXR4(prim_cddddr,cdr,cdr,cdr,cdr)
+CXR4(prim_caaaar,car,car,car,car) CXR4(prim_caaadr,cdr,car,car,car)
+CXR4(prim_caadar,car,cdr,car,car) CXR4(prim_caaddr,cdr,cdr,car,car)
+CXR4(prim_cadaar,car,car,cdr,car) CXR4(prim_cadadr,cdr,car,cdr,car)
+CXR4(prim_caddar,car,cdr,cdr,car) CXR4(prim_cadddr,cdr,cdr,cdr,car)
+CXR4(prim_cdaaar,car,car,car,cdr) CXR4(prim_cdaadr,cdr,car,car,cdr)
+CXR4(prim_cdadar,car,cdr,car,cdr) CXR4(prim_cdaddr,cdr,cdr,car,cdr)
+CXR4(prim_cddaar,car,car,cdr,cdr) CXR4(prim_cddadr,cdr,car,cdr,cdr)
+CXR4(prim_cdddar,car,cdr,cdr,cdr) CXR4(prim_cddddr,cdr,cdr,cdr,cdr)
