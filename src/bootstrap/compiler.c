@@ -234,6 +234,8 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
     local_scope_t lambda_scope = {0};
     // Extract params, building both scope names and a Scheme list
     int param_idx = 0;
+    int nfixed = 0;  // number of fixed params (non-rest), 0 for non-dotted
+    word rest_param = 0;  // rest param symbol (or 0 if non-dotted)
     word cur = args;
     word param_list = word_nil();  // reversed list of param symbols
     while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR && param_idx < MAX_LOCALS) {
@@ -250,6 +252,21 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
         pair_car(pp) = param_sym; pair_cdr(pp) = param_list;
         param_list = ptr_to_word(pp);
         cur = pair_cdr(ptr_from_word(cur));
+    }
+    // Check for dotted-tail: if cur is a symbol, it's the rest param
+    if (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_SYMBOL && param_idx < MAX_LOCALS) {
+        nfixed = param_idx;
+        rest_param = cur;
+        word* shdr2 = ptr_from_word(rest_param);
+        int plen2 = (int)string_length(shdr2);
+        char* pname2 = (char*)malloc(plen2 + 1);
+        for (int i = 0; i < plen2; i++)
+            pname2[i] = (char)word_to_char(string_ref(shdr2, i));
+        pname2[plen2] = '\0';
+        lambda_scope.names[param_idx++] = pname2;
+        word* pp2 = vm->gc->alloc_words(4); obj_set_type(pp2, OBJ_TYPE_PAIR);
+        pair_car(pp2) = rest_param; pair_cdr(pp2) = param_list;
+        param_list = ptr_to_word(pp2);
     }
     lambda_scope.count = param_idx;
 
@@ -328,11 +345,17 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
         return;
     }
 
-    // Emit CLOSE: code_idx (2B little-endian), nfree (1B)
+    // Emit CLOSE: code_idx (2B little-endian), nfree (1B), nfixed (1B, bit7=dotted)
     emit_byte(buf, OP_CLOSE);
     emit_byte(buf, (uint8_t)(code_idx & 0xFF));
     emit_byte(buf, (uint8_t)((code_idx >> 8) & 0xFF));
     emit_byte(buf, (uint8_t)nfree);
+    if (nfixed > 0 || rest_param) {
+        // dotted-tail: set bit 7 as dotted flag
+        emit_byte(buf, (uint8_t)(0x80 | (nfixed & 0x7F)));
+    } else {
+        emit_byte(buf, 0);
+    }
 
     // Clean up param names
     for (int i = 0; i < param_idx; i++) free((void*)lambda_scope.names[i]);

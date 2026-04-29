@@ -155,25 +155,43 @@
 (define (_compile-lambda args cb cs env)
   (let ((params (car args)) (body (cdr args)))
     (let ((wrapped-body (if (null? (cdr body)) (car body) (cons 'begin body))))
-      (let* ((free-syms (_dedup (_free-syms wrapped-body params env)))
-             (nfree (_count-exprs free-syms))
-             (captured (_assign-slots free-syms 1))
-             (child-env (_append captured (_assign-slots params (+ nfree 1)))))
-        (let ((child-cb (_make-cb)) (child-cs (_make-consts)))
-          (_compile-expr wrapped-body child-cb child-cs child-env)
-          (_emit-byte! child-cb OP-RETURN)
-          (let ((code-idx (assemble-code (cons (_cb->list child-cb) (_cs->list child-cs)))))
-            ;; Emit LREF for each captured var from parent env
-            (let _emit ((cap captured))
-              (if (null? cap) 0
-                  (begin
-                    (_emit-byte! cb OP-LREF)
-                    (_emit-byte! cb (_assq-lookup (car (car cap)) env))
-                    (_emit (cdr cap)))))
-            (_emit-byte! cb OP-CLOSE)
-            (_emit-byte! cb (remainder code-idx 256))
-            (_emit-byte! cb (quotient code-idx 256))
-            (_emit-byte! cb nfree)))))))
+      ;; Detect dotted-tail and count fixed params
+      (let* ((parsed (_parse-params params 0))
+             (fixed-params (car parsed))
+             (rest-param (cdr parsed))
+             (nfixed (_count-exprs fixed-params))
+             (is-dotted (if rest-param 1 0)))
+        ;; Build full param list for free var detection
+        (let ((all-params (if rest-param (_append fixed-params (list rest-param)) fixed-params)))
+          (let* ((free-syms (_dedup (_free-syms wrapped-body all-params env)))
+                 (nfree (_count-exprs free-syms))
+                 (captured (_assign-slots free-syms 1))
+                 (child-env (_append captured (_assign-slots all-params (+ nfree 1)))))
+            (let ((child-cb (_make-cb)) (child-cs (_make-consts)))
+              (_compile-expr wrapped-body child-cb child-cs child-env)
+              (_emit-byte! child-cb OP-RETURN)
+              (let ((code-idx (assemble-code (cons (_cb->list child-cb) (_cs->list child-cs)))))
+                ;; Emit LREF for each captured var from parent env
+                (let _emit ((cap captured))
+                  (if (null? cap) 0
+                      (begin
+                        (_emit-byte! cb OP-LREF)
+                        (_emit-byte! cb (_assq-lookup (car (car cap)) env))
+                        (_emit (cdr cap)))))
+                (_emit-byte! cb OP-CLOSE)
+                (_emit-byte! cb (remainder code-idx 256))
+                (_emit-byte! cb (quotient code-idx 256))
+                (_emit-byte! cb nfree)
+                (_emit-byte! cb (if is-dotted (+ 128 nfixed) 0))))))))))
+
+;; _parse-params: walk param list, return (fixed-params . rest-param-or-#f)
+(define (_parse-params p i)
+  (if (pair? p)
+      (let ((result (_parse-params (cdr p) (+ i 1))))
+        (cons (cons (car p) (car result)) (cdr result)))
+      (if (symbol? p)
+          (cons '() p)       ; dotted-tail: rest param found
+          (cons '() #f))))   ; null? or non-symbol → no rest param
 
 ;; === Macro system (in compiler.scm for Phase 1a loading) ===
 (define _macro-id-cell (cons 0 '()))
