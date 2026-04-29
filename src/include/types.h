@@ -91,6 +91,7 @@ enum {
     OBJ_TYPE_COMPLEX      = 10,
     OBJ_TYPE_CODE         = 11,
     OBJ_TYPE_RECORD       = 12,
+    OBJ_TYPE_CONTINUATION = 13,
 };
 
 #define obj_type(hdr)        ((hdr)[TYPE_WORD_INDEX])

@@ -113,6 +113,7 @@ word prim_bytevector_u8_set(vm_state_t* vm, int nargs);
 word prim_bytevector_to_u8_list(vm_state_t* vm, int nargs);
 word prim_u8_list_to_bytevector(vm_state_t* vm, int nargs);
 word prim_gensym(vm_state_t* vm, int nargs);
+word prim_call_cc(vm_state_t* vm, int nargs);
 word prim_eval(vm_state_t* vm, int nargs);
 word prim_string_to_symbol(vm_state_t* vm, int nargs);
 word prim_string_append(vm_state_t* vm, int nargs);
@@ -375,6 +376,7 @@ static prim_entry_t prim_table[] = {
     {"bytevector-u8-set!",    prim_bytevector_u8_set},
     {"bytevector->u8-list",   prim_bytevector_to_u8_list},
     {"u8-list->bytevector",   prim_u8_list_to_bytevector},
+    {"call/cc",          prim_call_cc},
     {"gensym",           prim_gensym},
     {"eval",             prim_eval},
     {"not",              prim_not},
