@@ -623,6 +623,137 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         return;
     }
 
+    if (is_symbol(fn, "case")) {
+        // (case key ((datums ...) body ...) ... (else else-body ...))
+        // Desugar to: ((lambda (tmp) if-chain) key)
+        word key_expr = pair_car(ptr_from_word(args));
+        word clauses = pair_cdr(ptr_from_word(args));
+
+        // Collect clauses into array for reverse iteration
+        word carr[64];
+        int nc = 0;
+        word cc = clauses;
+        while (is_ptr(cc) && obj_type(ptr_from_word(cc)) == OBJ_TYPE_PAIR && nc < 64) {
+            carr[nc++] = pair_car(ptr_from_word(cc));
+            cc = pair_cdr(ptr_from_word(cc));
+        }
+
+        // Build inner if-chain (last clause first, working backward)
+        word inner = word_nil(); // default: nil (no else clause)
+        for (int ci = nc - 1; ci >= 0; ci--) {
+            word clause = carr[ci];
+            word* chdr = ptr_from_word(clause);
+            word test_part = pair_car(chdr);
+            word body_part = pair_cdr(chdr);
+
+            // Check for else clause
+            int is_else = 0;
+            if (is_ptr(test_part) && obj_type(ptr_from_word(test_part)) == OBJ_TYPE_SYMBOL) {
+                word* thdr = ptr_from_word(test_part);
+                if ((int)string_length(thdr) == 4 &&
+                    word_to_char(string_ref(thdr,0))=='e' &&
+                    word_to_char(string_ref(thdr,1))=='l' &&
+                    word_to_char(string_ref(thdr,2))=='s' &&
+                    word_to_char(string_ref(thdr,3))=='e')
+                    is_else = 1;
+            }
+
+            // Build (begin body ...) — wrap in begin if multiple exps
+            word body_form;
+            if (is_ptr(body_part) && obj_type(ptr_from_word(body_part)) == OBJ_TYPE_PAIR &&
+                is_ptr(pair_cdr(ptr_from_word(body_part))) &&
+                obj_type(ptr_from_word(pair_cdr(ptr_from_word(body_part)))) == OBJ_TYPE_PAIR) {
+                // Multiple body expressions — wrap in (begin ...)
+                word* bsym = vm->gc->alloc_words(3 + 5); obj_set_type(bsym, OBJ_TYPE_SYMBOL);
+                bsym[DATA_START_INDEX] = (word)5;
+                for (int bi = 0; bi < 5; bi++)
+                    string_set(bsym, bi, word_from_char((unsigned char)"begin"[bi]));
+                word* bp = vm->gc->alloc_words(4); obj_set_type(bp, OBJ_TYPE_PAIR);
+                pair_car(bp) = ptr_to_word(bsym); pair_cdr(bp) = body_part;
+                body_form = ptr_to_word(bp);
+            } else {
+                body_form = pair_car(ptr_from_word(body_part));
+            }
+
+            if (is_else) {
+                inner = body_form;
+            } else {
+                // Build (if (memv tmp (quote (datums ...))) body_form inner)
+                // 1. Build (quote (datums ...))
+                word* qsym = vm->gc->alloc_words(3 + 5); obj_set_type(qsym, OBJ_TYPE_SYMBOL);
+                qsym[DATA_START_INDEX] = (word)5;
+                for (int qi = 0; qi < 5; qi++)
+                    string_set(qsym, qi, word_from_char((unsigned char)"quote"[qi]));
+                word* qp = vm->gc->alloc_words(4); obj_set_type(qp, OBJ_TYPE_PAIR);
+                pair_car(qp) = test_part; pair_cdr(qp) = word_nil();
+                word* quoted = vm->gc->alloc_words(4); obj_set_type(quoted, OBJ_TYPE_PAIR);
+                pair_car(quoted) = ptr_to_word(qsym); pair_cdr(quoted) = ptr_to_word(qp);
+
+                // 2. Build (memv tmp <quoted>)
+                // memv takes (key list) — key first, then list
+                word* tmp_sym = vm->gc->alloc_words(3 + 3); obj_set_type(tmp_sym, OBJ_TYPE_SYMBOL);
+                tmp_sym[DATA_START_INDEX] = (word)3;
+                for (int ti = 0; ti < 3; ti++)
+                    string_set(tmp_sym, ti, word_from_char((unsigned char)"tmp"[ti]));
+                word* memv_sym = vm->gc->alloc_words(3 + 4); obj_set_type(memv_sym, OBJ_TYPE_SYMBOL);
+                memv_sym[DATA_START_INDEX] = (word)4;
+                for (int mi = 0; mi < 4; mi++)
+                    string_set(memv_sym, mi, word_from_char((unsigned char)"memv"[mi]));
+                // Build args list: (tmp quoted) — tmp first (key), quoted second (list)
+                word* mv_rest = vm->gc->alloc_words(4); obj_set_type(mv_rest, OBJ_TYPE_PAIR);
+                pair_car(mv_rest) = ptr_to_word(quoted); pair_cdr(mv_rest) = word_nil();
+                word* mv_args = vm->gc->alloc_words(4); obj_set_type(mv_args, OBJ_TYPE_PAIR);
+                pair_car(mv_args) = ptr_to_word(tmp_sym); pair_cdr(mv_args) = ptr_to_word(mv_rest);
+                word* memv_call = vm->gc->alloc_words(4); obj_set_type(memv_call, OBJ_TYPE_PAIR);
+                pair_car(memv_call) = ptr_to_word(memv_sym); pair_cdr(memv_call) = ptr_to_word(mv_args);
+
+                // 3. Build (if <memv_call> body_form inner)
+                // Structure: (if . (test . (consequent . (alternate . ()))))
+                word* if_sym2 = vm->gc->alloc_words(3 + 2); obj_set_type(if_sym2, OBJ_TYPE_SYMBOL);
+                if_sym2[DATA_START_INDEX] = (word)2;
+                string_set(if_sym2,0,word_from_char('i'));
+                string_set(if_sym2,1,word_from_char('f'));
+                word* alt_cell = vm->gc->alloc_words(4); obj_set_type(alt_cell, OBJ_TYPE_PAIR);
+                pair_car(alt_cell) = inner; pair_cdr(alt_cell) = word_nil();
+                word* cons_cell = vm->gc->alloc_words(4); obj_set_type(cons_cell, OBJ_TYPE_PAIR);
+                pair_car(cons_cell) = body_form; pair_cdr(cons_cell) = ptr_to_word(alt_cell);
+                word* test_cell = vm->gc->alloc_words(4); obj_set_type(test_cell, OBJ_TYPE_PAIR);
+                pair_car(test_cell) = ptr_to_word(memv_call); pair_cdr(test_cell) = ptr_to_word(cons_cell);
+                word* if_form = vm->gc->alloc_words(4); obj_set_type(if_form, OBJ_TYPE_PAIR);
+                pair_car(if_form) = ptr_to_word(if_sym2); pair_cdr(if_form) = ptr_to_word(test_cell);
+                inner = ptr_to_word(if_form);
+            }
+        }
+
+        // Build (lambda (tmp) inner)
+        word* tmp_sym2 = vm->gc->alloc_words(3 + 3); obj_set_type(tmp_sym2, OBJ_TYPE_SYMBOL);
+        tmp_sym2[DATA_START_INDEX] = (word)3;
+        for (int ti2 = 0; ti2 < 3; ti2++)
+            string_set(tmp_sym2, ti2, word_from_char((unsigned char)"tmp"[ti2]));
+        word* l_sym = vm->gc->alloc_words(3 + 6); obj_set_type(l_sym, OBJ_TYPE_SYMBOL);
+        l_sym[DATA_START_INDEX] = (word)6;
+        for (int li = 0; li < 6; li++)
+            string_set(l_sym, li, word_from_char((unsigned char)"lambda"[li]));
+        word* params_pair = vm->gc->alloc_words(4); obj_set_type(params_pair, OBJ_TYPE_PAIR);
+        pair_car(params_pair) = ptr_to_word(tmp_sym2); pair_cdr(params_pair) = word_nil();
+        word* body_pair = vm->gc->alloc_words(4); obj_set_type(body_pair, OBJ_TYPE_PAIR);
+        pair_car(body_pair) = inner; pair_cdr(body_pair) = word_nil();
+        word* lambda_tail = vm->gc->alloc_words(4); obj_set_type(lambda_tail, OBJ_TYPE_PAIR);
+        pair_car(lambda_tail) = ptr_to_word(params_pair); pair_cdr(lambda_tail) = ptr_to_word(body_pair);
+        word* lambda_form = vm->gc->alloc_words(4); obj_set_type(lambda_form, OBJ_TYPE_PAIR);
+        pair_car(lambda_form) = ptr_to_word(l_sym); pair_cdr(lambda_form) = ptr_to_word(lambda_tail);
+
+        // Build ((lambda (tmp) inner) key-expr)
+        word* key_pair = vm->gc->alloc_words(4); obj_set_type(key_pair, OBJ_TYPE_PAIR);
+        pair_car(key_pair) = key_expr; pair_cdr(key_pair) = word_nil();
+        word* call_form = vm->gc->alloc_words(4); obj_set_type(call_form, OBJ_TYPE_PAIR);
+        pair_car(call_form) = ptr_to_word(lambda_form); pair_cdr(call_form) = ptr_to_word(key_pair);
+
+        // Compile the call form
+        compile_list(buf, vm, ptr_to_word(call_form), scope, env);
+        return;
+    }
+
     if (is_symbol(fn, "define-syntax")) {
         // (define-syntax name transformer-expr)
         // Evaluate transformer via prim_eval and store in *macro-table*
