@@ -63,3 +63,13 @@ test_closure = executable('test_closure',
   link_args: ['-lm'],
 )
 test('closure', test_closure)
+
+test_macro = executable('test_macro',
+  'test_macro.c',
+  include_directories: test_scheme_inc,
+  link_with: scheme_core,
+  link_args: ['-lm'],
+)
+test('macro', test_macro,
+  workdir: meson.project_source_root(),
+)

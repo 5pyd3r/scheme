@@ -19,11 +19,65 @@
 (define (_count-exprs lst) (if (null? lst) 0 (+ 1 (_count-exprs (cdr lst)))))
 (define (_patch-jmp cb jmp-pos target) (let ((off (- target (+ jmp-pos 3)))) (let ((u (if (< off 0) (+ off 65536) off))) (_cb-patch! cb (+ jmp-pos 1) (remainder u 256)) (_cb-patch! cb (+ jmp-pos 2) (quotient u 256)))))
 
-(define (_compile-args args cb cs) (if (null? args) 0 (begin (_compile-args (cdr args) cb cs) (_compile-expr (car args) cb cs))))
+;; === Helpers for closure capture (defined before _compile-expr) ===
+;; _assq-lookup: return cdr of matching key in alist, or #f
+(define (_assq-lookup key alist)
+  (if (null? alist) #f
+      (if (eq? key (car (car alist))) (cdr (car alist))
+          (_assq-lookup key (cdr alist)))))
+
+;; _is-primitive?: #t if sym is a known primitive
+(define (_is-primitive? sym)
+  (if (symbol? sym) (if (prim-index sym) #t #f) #f))
+
+;; _memq: like memq using eq?  (lib.scm version not available yet during Phase 1a)
+(define (_memq x lst)
+  (if (null? lst) #f (if (eq? x (car lst)) lst (_memq x (cdr lst)))))
+
+;; _append: append two lists
+(define (_append a b)
+  (if (null? a) b (cons (car a) (_append (cdr a) b))))
+
+;; _dedup: remove duplicates from list (keeps first occurrence)
+(define (_dedup syms)
+  (if (null? syms) '()
+      (let ((s (car syms)) (rest (_dedup (cdr syms))))
+        (if (_memq s rest) rest (cons s rest)))))
+
+;; _assign-slots: create alist assigning slots starting at 'start'
+(define (_assign-slots syms start)
+  (if (null? syms) '()
+      (cons (cons (car syms) start)
+            (_assign-slots (cdr syms) (+ start 1)))))
+
+;; _free-syms: collect free symbols in expr (relative to params and env)
+(define (_free-syms expr params env)
+  (if (null? expr) '()
+      (if (symbol? expr)
+          (if (_assq-lookup expr params) '()
+              (if (_is-primitive? expr) '()
+                  (if (_assq-lookup expr env) (list expr) '())))
+          (if (pair? expr)
+              (if (eq? (car expr) 'quote) '()
+                  (if (eq? (car expr) 'lambda)
+                      (_free-syms-list (cdr (cdr expr)) (car (cdr expr)) env)
+                      (_append (_free-syms (car expr) params env)
+                               (_free-syms-list (cdr expr) params env))))
+              '()))))
+
+(define (_free-syms-list lst params env)
+  (if (null? lst) '()
+      (_append (_free-syms (car lst) params env)
+               (_free-syms-list (cdr lst) params env))))
+
+;; _compile-args: compile argument list right-to-left
+(define (_compile-args args cb cs env)
+  (if (null? args) 0 (begin (_compile-args (cdr args) cb cs env) (_compile-expr (car args) cb cs env))))
 
 ;; _is-handled? — returns #t if the compiler handles this form directly
 (define (_is-handled? fn)
-  (if (eq? fn 'cons) #t
+  (if (eq? fn 'lambda) #t
+      (if (eq? fn 'cons) #t
           (if (eq? fn 'car) #t
               (if (eq? fn 'cdr) #t
                   (if (eq? fn 'null?) #t
@@ -45,16 +99,11 @@
                                                                                   (if (eq? fn 'assemble-code) #t
                                                                                       (if (eq? fn 'find-global-slot) #t
                                                                                           (if (eq? fn 'define-syntax) #t
-                                                                                              #f)))))))))))))))))))))))
+                                                                                              #f))))))))))))))))))))))))
 
 ;; _lookup-macro — returns transformer or #f if not a macro
 (define (_lookup-macro name)
   (_assq-lookup name (car *macro-table*)))
-
-(define (_assq-lookup key alist)
-  (if (null? alist) #f
-      (if (eq? key (car (car alist))) (cdr (car alist))
-          (_assq-lookup key (cdr alist)))))
 
 ;; Top-level macro expansion — called from C trampoline, not from _compile-expr
 (define (_expand-once form)
@@ -63,11 +112,12 @@
         (if t (eval (list t (list 'quote form))) form))
       form))
 
-;; Macro expansion helper — must be before _compile-expr (forward ref issue)
+;; Macro expansion helper
 (define (_expand-and-compile form cb cs)
-  (_compile-expr (eval (list (_lookup-macro (car form)) (list 'quote form))) cb cs))
+  (_compile-expr (eval (list (_lookup-macro (car form)) (list 'quote form))) cb cs '()))
 
-(define (_compile-expr expr cb cs)
+;; === Main expression compiler: takes expr, cb, cs, env ===
+(define (_compile-expr expr cb cs env)
   (if (fixnum? expr) (begin (_emit-byte! cb OP-PUSH-INT) (_emit-byte! cb (remainder expr 256)) (_emit-byte! cb (remainder (quotient expr 256) 256)) (_emit-byte! cb (remainder (quotient expr 65536) 256)) (_emit-byte! cb (remainder (quotient expr 16777216) 256)))
       (if (null? expr) (_emit-byte! cb OP-PUSH-NIL)
           (if (eq? expr #t) (_emit-byte! cb OP-PUSH-TRUE)
@@ -78,10 +128,16 @@
                           (if (_lookup-macro (car expr))
                               (_expand-and-compile expr cb cs)
                               (if (_is-handled? (car expr))
-                                  (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs)
-                                      (begin (_compile-args (cdr expr) cb cs) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256))))
+                                  (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs env)
+                                      (if (eq? (car expr) 'lambda) (_compile-lambda (cdr expr) cb cs env)
+                                          (begin (_compile-args (cdr expr) cb cs env) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256)))))
                                   (_cb-mark-error! cb))))
-                      (if (symbol? expr) (begin (_emit-byte! cb OP-GREF) (_emit-byte! cb (find-global-slot expr)))
+                      ;; Symbol dispatch: env lookup before global
+                      (if (symbol? expr)
+                          (let ((env-slot (_assq-lookup expr env)))
+                            (if env-slot
+                                (begin (_emit-byte! cb OP-LREF) (_emit-byte! cb env-slot))
+                                (begin (_emit-byte! cb OP-GREF) (_emit-byte! cb (find-global-slot expr)))))
                           (begin (_emit-byte! cb OP-PUSH-CONST) (_emit-byte! cb (_add-const! cs expr))))))))))
 
 (define (_compile-define-syntax args cb cs)
@@ -89,8 +145,35 @@
     (set-car! *macro-table* (cons (cons (car args) (eval (car (cdr args)))) (car *macro-table*)))
     (_emit-byte! cb OP-PUSH-NIL)))
 
-(define (_compile-begin args cb cs) (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs)))
-(define (_compile-begin-1 args cb cs) (if (null? (cdr args)) (_compile-expr (car args) cb cs) (begin (_compile-expr (car args) cb cs) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs))))
+(define (_compile-begin args cb cs env)
+  (if (null? args) (_emit-byte! cb OP-PUSH-NIL) (_compile-begin-1 args cb cs env)))
+(define (_compile-begin-1 args cb cs env)
+  (if (null? (cdr args)) (_compile-expr (car args) cb cs env)
+      (begin (_compile-expr (car args) cb cs env) (_emit-byte! cb OP-POP) (_compile-begin-1 (cdr args) cb cs env))))
+
+;; === Lambda compilation with closure capture ===
+(define (_compile-lambda args cb cs env)
+  (let ((params (car args)) (body (cdr args)))
+    (let ((wrapped-body (if (null? (cdr body)) (car body) (cons 'begin body))))
+      (let* ((free-syms (_dedup (_free-syms wrapped-body params env)))
+             (nfree (_count-exprs free-syms))
+             (captured (_assign-slots free-syms 1))
+             (child-env (_append captured (_assign-slots params (+ nfree 1)))))
+        (let ((child-cb (_make-cb)) (child-cs (_make-consts)))
+          (_compile-expr wrapped-body child-cb child-cs child-env)
+          (_emit-byte! child-cb OP-RETURN)
+          (let ((code-idx (assemble-code (cons (_cb->list child-cb) (_cs->list child-cs)))))
+            ;; Emit LREF for each captured var from parent env
+            (let _emit ((cap captured))
+              (if (null? cap) 0
+                  (begin
+                    (_emit-byte! cb OP-LREF)
+                    (_emit-byte! cb (_assq-lookup (car (car cap)) env))
+                    (_emit (cdr cap)))))
+            (_emit-byte! cb OP-CLOSE)
+            (_emit-byte! cb (remainder code-idx 256))
+            (_emit-byte! cb (quotient code-idx 256))
+            (_emit-byte! cb nfree)))))))
 
 ;; === Macro system (in compiler.scm for Phase 1a loading) ===
 (define _macro-id-cell (cons 0 '()))
@@ -192,4 +275,4 @@
     (_sr-increment-and-create clauses literals)))
 
 ;; === Main entry ===
-(define (compile expr) (let ((cb (_make-cb)) (cs (_make-consts))) (_compile-expr expr cb cs) (if (_cb-is-error? cb) #f (begin (_emit-byte! cb 255) (cons (_cb->list cb) (_cs->list cs))))))
+(define (compile expr) (let ((cb (_make-cb)) (cs (_make-consts))) (_compile-expr expr cb cs '()) (if (_cb-is-error? cb) #f (begin (_emit-byte! cb 255) (cons (_cb->list cb) (_cs->list cs))))))
