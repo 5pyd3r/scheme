@@ -10,70 +10,12 @@
    cont[7] = saved env (as uintptr_t)
 */
 
+/* call/cc via primitive dispatch — used when call/cc is called as a primitive
+   rather than via the OP_CALL_CC opcode (which the C compiler emits directly). */
 word prim_call_cc(vm_state_t* vm, int nargs) {
-    if (nargs != 1) {
-        vm->error_kind = ERR_ARITY;
-        vm->error_msg = "call/cc: expected 1 argument";
-        return word_nil();
-    }
-
-    word proc = vm->sp[0];
-
-    // Allocate continuation object: header(3) + 5 words of state
-    word* cont = vm->gc->alloc_words(3 + 5);
-    obj_set_type(cont, OBJ_TYPE_CONTINUATION);
-
-    cont[DATA_START_INDEX + 0] = (word)(uintptr_t)(vm->sp - vm->stack);
-    cont[DATA_START_INDEX + 1] = (word)(uintptr_t)(vm->fp - vm->stack);
-    cont[DATA_START_INDEX + 2] = (word)(uintptr_t)vm->ip;
-    cont[DATA_START_INDEX + 3] = (word)(uintptr_t)vm->current_code;
-    cont[DATA_START_INDEX + 4] = (word)(uintptr_t)vm->env;
-
-    word cont_word = ptr_to_word(cont);
-
-    // Set up call: (proc cont)
-    // Pop the proc arg from sp (it was pushed by PRIM_CALL setup)
-    // Then push cont as arg and proc as closure
-    vm->sp--;               // discard proc from PRIM_CALL stack
-    *++vm->sp = cont_word;  // arg: continuation
-    *++vm->sp = proc;       // closure on top
-
-    // Manually set up a frame for calling (proc cont)
-    // This is simplified version of OP_CALL frame setup
-    word* clo = ptr_from_word(proc);
-    word nfree_word = clo[DATA_START_INDEX + 2];
-    uint8_t nfree_val = (uint8_t)(nfree_word & 0xFF);
-
-    word* base = vm->sp - 1;  // base[0] = cont (arg), base[1] = proc (closure)
-    word old_sp = (word)(uintptr_t)(base - 1);
-
-    // Shift arg up FIRST (before writing frame header)
-    for (int i = 0; i >= 0; i--)
-        base[i + 4 + nfree_val] = base[i];
-
-    // Write frame header
-    base[0] = old_sp;
-    base[1] = (word)(uintptr_t)vm->ip;
-    base[2] = (word)(uintptr_t)vm->env;
-    base[3] = (word)(uintptr_t)vm->fp;
-
-    // Unpack captured vars
-    if (nfree_val > 0) {
-        word* env_vec = (word*)(uintptr_t)closure_env(clo);
-        if (env_vec) {
-            for (int i = 0; i < nfree_val; i++)
-                base[4 + i] = env_vec[DATA_START_INDEX + 1 + i];
-        }
-    }
-
-    // Set new frame
-    vm->fp = base + 3;
-    vm->env = (word*)(uintptr_t)closure_env(clo);
-    vm->sp = base + 4 + 1 + nfree_val;  // 1 arg
-    vm->current_code = (word*)(uintptr_t)closure_code(clo);
-    vm->ip = (uint8_t*)(vm->current_code + 3); // jump to first bytecode
-
-    // The PRIM_CALL handler checks if ip changed and skips cleanup
+    // Not yet fully implemented — use C compiler OP_CALL_CC path instead
+    vm->error_kind = ERR_INTERNAL;
+    vm->error_msg = "call/cc: use (call/cc proc) syntax for compiler support";
     return word_nil();
 }
 
@@ -87,11 +29,11 @@ void vm_restore_continuation(vm_state_t* vm, word cont_word, int nargs_val) {
     size_t fp_off = (size_t)cont[DATA_START_INDEX + 1];
 
     // Get the value to return (first arg passed to continuation)
-    // The args are on the current stack at sp[-nargs+1..0]
-    // We only use the first value
+    // OP_CALL stack layout: sp[-nargs..-1] = args, sp[0] = closure (continuation)
+    // First value arg is at sp[-nargs]
     word value;
     if (nargs_val >= 1) {
-        value = vm->sp[-nargs_val + 1]; // first arg
+        value = vm->sp[-nargs_val]; // first value arg
     } else {
         value = word_nil();
     }

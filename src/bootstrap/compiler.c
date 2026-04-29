@@ -26,6 +26,17 @@ static int add_const(code_buf_t* buf, word val) {
     return buf->nconsts++;
 }
 
+// Create an interned-like symbol (not added to global symbol table, only GC-allocated)
+static word make_sym(vm_state_t* vm, const char* name) {
+    int len = (int)strlen(name);
+    word* sym = vm->gc->alloc_words(3 + len);
+    obj_set_type(sym, OBJ_TYPE_SYMBOL);
+    sym[DATA_START_INDEX] = (word)len;
+    for (int i = 0; i < len; i++)
+        string_set(sym, i, word_from_char((unsigned char)name[i]));
+    return ptr_to_word(sym);
+}
+
 static bool is_symbol(word w, const char* name) {
     if (!is_ptr(w)) return false;
     word* hdr = ptr_from_word(w);
@@ -238,13 +249,11 @@ static word qq_expand(vm_state_t* vm, word tmpl) {
         if (is_fixnum(tmpl) || is_true(tmpl) || is_false(tmpl) || is_char(tmpl) || is_nil(tmpl))
             return tmpl;
         // Otherwise wrap in (quote tmpl)
-        word* qsym = vm->gc->alloc_words(3 + 5); obj_set_type(qsym, OBJ_TYPE_SYMBOL);
-        qsym[DATA_START_INDEX] = (word)5;
-        for (int i = 0; i < 5; i++) string_set(qsym, i, word_from_char((unsigned char)"quote"[i]));
+        word quote_sym = make_sym(vm, "quote");
         word* qp = vm->gc->alloc_words(4); obj_set_type(qp, OBJ_TYPE_PAIR);
         pair_car(qp) = tmpl; pair_cdr(qp) = word_nil();
         word* qform = vm->gc->alloc_words(4); obj_set_type(qform, OBJ_TYPE_PAIR);
-        pair_car(qform) = ptr_to_word(qsym); pair_cdr(qform) = ptr_to_word(qp);
+        pair_car(qform) = quote_sym; pair_cdr(qform) = ptr_to_word(qp);
         return ptr_to_word(qform);
     }
 
@@ -1247,6 +1256,12 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             }
             emit_byte(buf, OP_APPLY);
             emit_byte(buf, (uint8_t)nargs);
+        } else if (is_symbol(fn, "call/cc")) {
+            // (call/cc proc) — compile proc, emit OP_CALL_CC
+            word cc_proc = pair_car(ptr_from_word(args));
+            compile_expr_to_buf(buf, vm, cc_proc, scope, env);
+            emit_byte(buf, OP_CALL_CC);
+            emit_byte(buf, 1); // 1 arg = proc
         } else {
             word acur2 = args;
             while (is_ptr(acur2) && obj_type(ptr_from_word(acur2)) == OBJ_TYPE_PAIR) {
