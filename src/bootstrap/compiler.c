@@ -230,6 +230,63 @@ static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body
 
 static void compile_expr_to_buf(code_buf_t* buf, vm_state_t* vm, word expr, local_scope_t* scope, word env);
 
+// quasiquote expansion: recursively transform template into constructor calls
+static word qq_expand(vm_state_t* vm, word tmpl) {
+    // Non-pair: wrap non-self-evaluating values in (quote ...)
+    if (!is_ptr(tmpl) || obj_type(ptr_from_word(tmpl)) != OBJ_TYPE_PAIR) {
+        // Self-evaluating: fixnum, boolean, char, nil
+        if (is_fixnum(tmpl) || is_true(tmpl) || is_false(tmpl) || is_char(tmpl) || is_nil(tmpl))
+            return tmpl;
+        // Otherwise wrap in (quote tmpl)
+        word* qsym = vm->gc->alloc_words(3 + 5); obj_set_type(qsym, OBJ_TYPE_SYMBOL);
+        qsym[DATA_START_INDEX] = (word)5;
+        for (int i = 0; i < 5; i++) string_set(qsym, i, word_from_char((unsigned char)"quote"[i]));
+        word* qp = vm->gc->alloc_words(4); obj_set_type(qp, OBJ_TYPE_PAIR);
+        pair_car(qp) = tmpl; pair_cdr(qp) = word_nil();
+        word* qform = vm->gc->alloc_words(4); obj_set_type(qform, OBJ_TYPE_PAIR);
+        pair_car(qform) = ptr_to_word(qsym); pair_cdr(qform) = ptr_to_word(qp);
+        return ptr_to_word(qform);
+    }
+
+    // Pair — check for unquote/unquote-splicing
+    word* hdr = ptr_from_word(tmpl);
+    word head = pair_car(hdr);
+    word tail = pair_cdr(hdr);
+
+    // head is the car — check if it's the symbol unquote/unquote-splicing
+    if (is_ptr(head) && obj_type(ptr_from_word(head)) == OBJ_TYPE_SYMBOL) {
+        word* ohdr = ptr_from_word(head);
+        int olen = (int)string_length(ohdr);
+        if (olen == 7) {
+            char oname[8]; for (int i = 0; i < 7; i++) oname[i] = (char)word_to_char(string_ref(ohdr, i));
+            oname[7] = '\0';
+            if (strcmp(oname, "unquote") == 0)
+                return pair_car(ptr_from_word(tail));
+        }
+        if (olen == 16) {
+            char oname[17]; for (int i = 0; i < 16; i++) oname[i] = (char)word_to_char(string_ref(ohdr, i));
+            oname[16] = '\0';
+            if (strcmp(oname, "unquote-splicing") == 0)
+                return pair_car(ptr_from_word(tail));
+        }
+    }
+
+    // Regular pair — build (cons (qq a) (qq b))
+    word expanded_a = qq_expand(vm, head);
+    word expanded_b = qq_expand(vm, tail);
+
+    word* csym = vm->gc->alloc_words(3 + 4); obj_set_type(csym, OBJ_TYPE_SYMBOL);
+    csym[DATA_START_INDEX] = (word)4;
+    for (int i = 0; i < 4; i++) string_set(csym, i, word_from_char((unsigned char)"cons"[i]));
+    word* c_rest = vm->gc->alloc_words(4); obj_set_type(c_rest, OBJ_TYPE_PAIR);
+    pair_car(c_rest) = expanded_b; pair_cdr(c_rest) = word_nil();
+    word* c_args = vm->gc->alloc_words(4); obj_set_type(c_args, OBJ_TYPE_PAIR);
+    pair_car(c_args) = expanded_a; pair_cdr(c_args) = ptr_to_word(c_rest);
+    word* c_form = vm->gc->alloc_words(4); obj_set_type(c_form, OBJ_TYPE_PAIR);
+    pair_car(c_form) = ptr_to_word(csym); pair_cdr(c_form) = ptr_to_word(c_args);
+    return ptr_to_word(c_form);
+}
+
 static void compile_lambda(code_buf_t* buf, vm_state_t* vm, word args, word body, word env) {
     local_scope_t lambda_scope = {0};
     // Extract params, building both scope names and a Scheme list
@@ -373,6 +430,14 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         int idx = add_const(buf, val);
         emit_byte(buf, OP_PUSH_CONST);
         emit_byte(buf, (uint8_t)idx);
+        return;
+    }
+
+    if (is_symbol(fn, "quasiquote")) {
+        // Expand (quasiquote template) to constructor calls, then compile
+        word tmpl = pair_car(ptr_from_word(args));
+        word expanded = qq_expand(vm, tmpl);
+        compile_expr_to_buf(buf, vm, expanded, scope, env);
         return;
     }
 

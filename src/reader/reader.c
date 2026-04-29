@@ -216,6 +216,42 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
         pair_cdr(pair1) = ptr_to_word(pair2);
         return ptr_to_word(pair1);
     }
+    if (c == '`') {
+        (*pos)++;
+        word expr = read_expr(vm, s, pos);
+        word* pair2 = vm->gc->alloc_words(4);
+        obj_set_type(pair2, OBJ_TYPE_PAIR);
+        pair_car(pair2) = expr; pair_cdr(pair2) = word_nil();
+        word* pair1 = vm->gc->alloc_words(4);
+        obj_set_type(pair1, OBJ_TYPE_PAIR);
+        pair_car(pair1) = vm_intern(vm, "quasiquote", 10);
+        pair_cdr(pair1) = ptr_to_word(pair2);
+        return ptr_to_word(pair1);
+    }
+    if (c == ',' && s[*pos + 1] == '@') {
+        *pos += 2;
+        word expr = read_expr(vm, s, pos);
+        word* pair2 = vm->gc->alloc_words(4);
+        obj_set_type(pair2, OBJ_TYPE_PAIR);
+        pair_car(pair2) = expr; pair_cdr(pair2) = word_nil();
+        word* pair1 = vm->gc->alloc_words(4);
+        obj_set_type(pair1, OBJ_TYPE_PAIR);
+        pair_car(pair1) = vm_intern(vm, "unquote-splicing", 16);
+        pair_cdr(pair1) = ptr_to_word(pair2);
+        return ptr_to_word(pair1);
+    }
+    if (c == ',') {
+        (*pos)++;
+        word expr = read_expr(vm, s, pos);
+        word* pair2 = vm->gc->alloc_words(4);
+        obj_set_type(pair2, OBJ_TYPE_PAIR);
+        pair_car(pair2) = expr; pair_cdr(pair2) = word_nil();
+        word* pair1 = vm->gc->alloc_words(4);
+        obj_set_type(pair1, OBJ_TYPE_PAIR);
+        pair_car(pair1) = vm_intern(vm, "unquote", 7);
+        pair_cdr(pair1) = ptr_to_word(pair2);
+        return ptr_to_word(pair1);
+    }
     return read_atom(vm, s, pos);
 }
 
