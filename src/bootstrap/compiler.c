@@ -1027,20 +1027,26 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         word* ahdr = ptr_from_word(args);
         word first = pair_car(ahdr);
         if (is_ptr(first) && obj_type(ptr_from_word(first)) == OBJ_TYPE_SYMBOL) {
-            // Named let: desugar to a recursive helper that takes itself as first arg
+            // Named let: support recursion via temporary global slot.
             // (let name ((var val) ...) body ...)
-            // → ((lambda (name-helper params ...) body-with-recursion) #f val ...)
-            // where body-with-recursion replaces (name e ...) with (name-helper name-helper e ...)
-            // Fallback for simplicity: just treat as regular let (name is discarded, recursion
-            // works via global define if needed). Let's just collect params and compile.
             word name_sym2 = first;
-            (void)name_sym2; // name is available but autorecursion not yet supported
             word* rest_hdr2 = ptr_from_word(pair_cdr(ahdr));
             first = pair_car(rest_hdr2); // the bindings list
-            // body_list starts after bindings
             word body_list2 = pair_cdr(rest_hdr2);
             word bindings2 = first;
-            // Use same desugaring as regular let but params+vars from bindings2, body from body_list2
+
+            // Get or create global slot for the name
+            int name_slot2 = vm_find_global_slot(vm, name_sym2);
+            if (name_slot2 < 0) {
+                if (vm->next_global_slot >= (int)vm->global_count) {
+                    size_t nc = vm->global_count * 2;
+                    vm->globals = realloc(vm->globals, nc * sizeof(word));
+                    vm->global_names = realloc(vm->global_names, nc * sizeof(word));
+                    vm->global_count = nc;
+                }
+                name_slot2 = vm->next_global_slot++;
+                vm->global_names[name_slot2] = name_sym2;
+            }
             word* body_list_hdr2 = ptr_from_word(body_list2);
             word body2;
             if (is_ptr(pair_cdr(body_list_hdr2)) &&
@@ -1085,9 +1091,29 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
             pair_car(args_pair3) = param_list2; pair_cdr(args_pair3) = ptr_to_word(body_pair3);
             word* lp3 = vm->gc->alloc_words(4); obj_set_type(lp3, OBJ_TYPE_PAIR);
             pair_car(lp3) = lambda_sym3; pair_cdr(lp3) = ptr_to_word(args_pair3);
-            word* cp3 = vm->gc->alloc_words(4); obj_set_type(cp3, OBJ_TYPE_PAIR);
-            pair_car(cp3) = ptr_to_word(lp3); pair_cdr(cp3) = val_list2;
-            compile_expr_to_buf(buf, vm, ptr_to_word(cp3), scope, env);
+            // Compile lambda → closure on stack
+            compile_expr_to_buf(buf, vm, ptr_to_word(lp3), scope, env);
+            // Store closure in global slot for recursive calls
+            emit_byte(buf, OP_GSET);
+            emit_byte(buf, (uint8_t)name_slot2);
+            emit_byte(buf, OP_POP); // remove closure from stack
+
+            // Compile init values
+            int nparams3 = 0;
+            {
+                word vcur3 = val_list2;
+                while (is_ptr(vcur3) && obj_type(ptr_from_word(vcur3)) == OBJ_TYPE_PAIR) {
+                    compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(vcur3)), scope, env);
+                    nparams3++;
+                    vcur3 = pair_cdr(ptr_from_word(vcur3));
+                }
+            }
+
+            // Push closure and call
+            emit_byte(buf, OP_GREF);
+            emit_byte(buf, (uint8_t)name_slot2);
+            emit_byte(buf, OP_CALL);
+            emit_byte(buf, (uint8_t)nparams3);
             return;
         }
         word bindings = first;
