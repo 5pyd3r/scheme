@@ -106,15 +106,19 @@
       #f))
 
 ;; Top-level macro expansion -- called from C trampoline, not from _compile-expr
+;; Calls transformer directly (no eval) to avoid nested vm_execute state corruption.
+;; Transformer expects the raw form, not quoted — same as (eval `(,t ',form))
+;; where eval evaluates the quote, giving the transformer just 'form'.
 (define (_expand-once form)
   (if (pair? form)
       (let ((t (_lookup-macro (car form))))
-        (if t (eval (list t (list 'quote form))) form))
+        (if t (t form) form))
       form))
 
-;; Macro expansion helper
+;; Macro expansion helper — calls transformer directly
 (define (_expand-and-compile form cb cs)
-  (_compile-expr (eval (list (_lookup-macro (car form)) (list 'quote form))) cb cs '()))
+  (let ((t (_lookup-macro (car form))))
+    (_compile-expr (t form) cb cs '())))
 
 ;; === Main expression compiler: takes expr, cb, cs, env ===
 (define (_compile-expr expr cb cs env)
@@ -224,9 +228,33 @@
                   (if (null? input) '() #f)
                   (if (eqv? pat input) '() #f))))))
 
+(define (_init-compound-bindings pat)
+  (if (symbol? pat) (list (cons pat '()))
+      (if (pair? pat)
+          (_append-alist (_init-compound-bindings (car pat))
+                        (_init-compound-bindings (cdr pat)))
+          '())))
+
+(define (_merge-compound single rest)
+  (if (null? single) '()
+      (cons (cons (car (car single))
+                  (cons (cdr (car single)) (cdr (assq (car (car single)) rest))))
+            (_merge-compound (cdr single) rest))))
+
+(define (_match-compound-ellipsis inner-pat input literals)
+  (if (null? input)
+      (_init-compound-bindings inner-pat)
+      (let ((first (_match-pat inner-pat (car input) literals)))
+        (if first
+            (let ((rest (_match-compound-ellipsis inner-pat (cdr input) literals)))
+              (if rest (_merge-compound first rest) #f))
+            #f))))
+
 (define (_match-pair pat input literals)
-  (if (if (pair? (cdr pat)) (if (null? (cdr (cdr pat))) (if (eq? (car (cdr pat)) '...) (if (symbol? (car pat)) (if (memq (car pat) literals) #f #t) #f) #f) #f) #f)
-      (list (cons (car pat) input))
+  (if (if (pair? (cdr pat)) (if (null? (cdr (cdr pat))) (eq? (car (cdr pat)) '...) #f) #f)
+      (if (symbol? (car pat))
+          (if (memq (car pat) literals) #f (list (cons (car pat) input)))
+          (if (pair? input) (_match-compound-ellipsis (car pat) input literals) #f))
       (if (_match-pat (car pat) (car input) literals)
           (if (_match-pat (cdr pat) (cdr input) literals)
               (_append-alist (_match-pat (car pat) (car input) literals) (_match-pat (cdr pat) (cdr input) literals))
@@ -253,10 +281,37 @@
                     (_fill-template (cdr tmpl) bindings rename-id)))
           tmpl)))
 
-(define (_fill-ellipsis inner-tmpl bindings rename-id)
-  (if (pair? (cdr (assq (_ellipsis-var inner-tmpl) bindings)))
-      (_fill-ellipsis-iter inner-tmpl (_ellipsis-var inner-tmpl) (cdr (assq (_ellipsis-var inner-tmpl) bindings)) bindings rename-id)
+(define (_list-ref lst i)
+  (if (= i 0) (car lst) (_list-ref (cdr lst) (- i 1))))
+
+(define (_template-vars tmpl)
+  (if (symbol? tmpl) (list tmpl)
+      (if (pair? tmpl) (_append (_template-vars (car tmpl)) (_template-vars (cdr tmpl))) '())))
+
+(define (_build-compound-bindings vars bindings idx)
+  (if (null? vars) '()
+      (cons (cons (car vars) (_list-ref (cdr (assq (car vars) bindings)) idx))
+            (_build-compound-bindings (cdr vars) bindings idx))))
+
+(define (_fill-compound-iter inner-tmpl vars bindings idx n rename-id)
+  (if (< idx n)
+      (cons (_fill-template inner-tmpl (_build-compound-bindings vars bindings idx) rename-id)
+            (_fill-compound-iter inner-tmpl vars bindings (+ idx 1) n rename-id))
       '()))
+
+(define (_fill-compound-ellipsis inner-tmpl bindings rename-id)
+  (let ((vars (_template-vars inner-tmpl)))
+    (let ((first-vals (cdr (assq (car vars) bindings))))
+      (let ((n (_count-exprs first-vals)))
+        (_fill-compound-iter inner-tmpl vars bindings 0 n rename-id)))))
+
+(define (_fill-ellipsis inner-tmpl bindings rename-id)
+  (if (symbol? inner-tmpl)
+      (if (pair? (cdr (assq (_ellipsis-var inner-tmpl) bindings)))
+          (_fill-ellipsis-iter inner-tmpl (_ellipsis-var inner-tmpl)
+             (cdr (assq (_ellipsis-var inner-tmpl) bindings)) bindings rename-id)
+          '())
+      (_fill-compound-ellipsis inner-tmpl bindings rename-id)))
 
 (define (_ellipsis-var tmpl)
   (if (symbol? tmpl) tmpl

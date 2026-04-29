@@ -390,11 +390,13 @@
 ;; NOTE: define-syntax is handled by C compiler during Phase 1b loading.
 ;; Clauses must be quoted since syntax-rules is a function, not a special form.
 
-;; TODO: letrec — requires multi-variable ellipsis in pattern matcher,
-;; plus set! updating captured closure copies (flat closure model limitation).
-;; TODO: case, do — case needs non-recursive multi-clause expansion
-;; (requires either C compiler special form or recursive _expand-once).
-;; do requires multi-variable ellipsis (like letrec).
+;; letrec: multi-variable ellipsis + direct transformer call (no eval).
+;; Recursive bindings need set! updating captured closure copies.
+(define-syntax letrec
+  (syntax-rules () '(((_ ((var val) ...) body ...)
+                      (let ((var val) ...) body ...)))))
+
+;; case is handled by C compiler as a special form.
 
 (define-syntax when
   (syntax-rules () '(((_ test body ...) (if test (begin body ...))))))
