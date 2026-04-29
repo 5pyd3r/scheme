@@ -1352,3 +1352,27 @@ word prim_expt(vm_state_t* vm, int nargs) {
     double result = pow(base, exp_val);
     return word_from_double(vm, result);
 }
+
+word prim_exact(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word w = vm->sp[0];
+    if (is_fixnum(w) || is_bignum(w)) return w;
+    if (is_flonum(w)) return prim_inexact_to_exact(vm, 1);
+    return w;
+}
+
+word prim_inexact(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word w = vm->sp[0];
+    if (is_flonum(w)) return w;
+    if (is_fixnum(w) || is_bignum(w)) return prim_exact_to_inexact(vm, 1);
+    return w;
+}
+
+word prim_exact_integer_pred(vm_state_t* vm, int nargs) {
+    if (nargs != 1) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word w = vm->sp[0];
+    if (is_fixnum(w)) return word_true();
+    if (is_flonum(w)) return word_false();
+    return word_false();
+}

@@ -34,6 +34,9 @@ word prim_number_pred(vm_state_t* vm, int nargs);
 word prim_integer_pred(vm_state_t* vm, int nargs);
 word prim_exact_pred(vm_state_t* vm, int nargs);
 word prim_inexact_pred(vm_state_t* vm, int nargs);
+word prim_exact(vm_state_t* vm, int nargs);
+word prim_inexact(vm_state_t* vm, int nargs);
+word prim_exact_integer_pred(vm_state_t* vm, int nargs);
 word prim_zerop(vm_state_t* vm, int nargs);
 word prim_positivep(vm_state_t* vm, int nargs);
 word prim_negativep(vm_state_t* vm, int nargs);
@@ -78,6 +81,8 @@ word prim_vector_length(vm_state_t* vm, int nargs);
 word prim_vector_ref(vm_state_t* vm, int nargs);
 word prim_vector_set(vm_state_t* vm, int nargs);
 word prim_list_to_vector(vm_state_t* vm, int nargs);
+word prim_string_to_vector(vm_state_t* vm, int nargs);
+word prim_vector_to_string(vm_state_t* vm, int nargs);
 word prim_vector_to_list(vm_state_t* vm, int nargs);
 word prim_equal(vm_state_t* vm, int nargs);
 word prim_charp(vm_state_t* vm, int nargs);
@@ -293,6 +298,9 @@ static prim_entry_t prim_table[] = {
     {"integer?",       prim_integer_pred},
     {"exact?",         prim_exact_pred},
     {"inexact?",       prim_inexact_pred},
+    {"exact",          prim_exact},
+    {"inexact",        prim_inexact},
+    {"exact-integer?", prim_exact_integer_pred},
     {"zero?",          prim_zerop},
     {"positive?",      prim_positivep},
     {"negative?",      prim_negativep},
@@ -337,6 +345,8 @@ static prim_entry_t prim_table[] = {
     {"vector-set!",      prim_vector_set},
     {"list->vector",     prim_list_to_vector},
     {"vector->list",     prim_vector_to_list},
+    {"string->vector",   prim_string_to_vector},
+    {"vector->string",   prim_vector_to_string},
     {"equal?",           prim_equal},
     {"char?",             prim_charp},
     {"char->integer",     prim_char_to_integer},

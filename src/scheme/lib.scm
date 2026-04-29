@@ -178,6 +178,18 @@
   (lambda (proc vec)
     (_vmap proc vec (make-vector (vector-length vec) #f) 0)))
 
+(define _vfe
+  (lambda (proc vec i)
+    (if (< i (vector-length vec))
+        (begin
+          (proc (vector-ref vec i))
+          (_vfe proc vec (+ i 1)))
+        #f)))
+
+(define vector-for-each
+  (lambda (proc vec)
+    (_vfe proc vec 0)))
+
 ; ==================== Character predicates ====================
 
 (define char-alphabetic?
@@ -307,6 +319,22 @@
 (define string-downcase
   (lambda (s)
     (_str-map char-downcase s (make-string (string-length s) #\space) 0)))
+
+(define string-map
+  (lambda (proc s)
+    (_str-map proc s (make-string (string-length s) #\space) 0)))
+
+(define _sfe
+  (lambda (proc s i)
+    (if (< i (string-length s))
+        (begin
+          (proc (string-ref s i))
+          (_sfe proc s (+ i 1)))
+        #f)))
+
+(define string-for-each
+  (lambda (proc s)
+    (_sfe proc s 0)))
 
 ; ==================== Bytevector library ====================
 

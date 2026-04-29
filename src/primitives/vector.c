@@ -179,3 +179,47 @@ word prim_vector_append(vm_state_t* vm, int nargs) {
     }
     return ptr_to_word(nv);
 }
+
+word prim_string_to_vector(vm_state_t* vm, int nargs) {
+    if (nargs < 1 || nargs > 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word sw = vm->sp[0];
+    if (!is_ptr(sw) || obj_type(ptr_from_word(sw)) != OBJ_TYPE_STRING)
+        { vm->error_kind = ERR_TYPE; return word_nil(); }
+    word* shdr = ptr_from_word(sw);
+    size_t len = string_length(shdr);
+    size_t start = 0;
+    if (nargs == 2) {
+        int64_t s = word_to_fixnum(vm->sp[1]);
+        if (s < 0 || (size_t)s > len) { vm->error_kind = ERR_TYPE; return word_nil(); }
+        start = (size_t)s;
+    }
+    size_t n = len - start;
+    word* vec = vm->gc->alloc_words(3 + n);
+    obj_set_type(vec, OBJ_TYPE_VECTOR);
+    vec[DATA_START_INDEX] = (word)n;
+    for (size_t i = 0; i < n; i++)
+        vector_set(vec, i, string_ref(shdr, start + i));
+    return ptr_to_word(vec);
+}
+
+word prim_vector_to_string(vm_state_t* vm, int nargs) {
+    if (nargs < 1 || nargs > 2) { vm->error_kind = ERR_ARITY; return word_nil(); }
+    word vw = vm->sp[0];
+    if (!is_ptr(vw) || obj_type(ptr_from_word(vw)) != OBJ_TYPE_VECTOR)
+        { vm->error_kind = ERR_TYPE; return word_nil(); }
+    word* vhdr = ptr_from_word(vw);
+    size_t len = vector_length(vhdr);
+    size_t start = 0;
+    if (nargs == 2) {
+        int64_t s = word_to_fixnum(vm->sp[1]);
+        if (s < 0 || (size_t)s > len) { vm->error_kind = ERR_TYPE; return word_nil(); }
+        start = (size_t)s;
+    }
+    size_t n = len - start;
+    word* str = vm->gc->alloc_words(3 + n);
+    obj_set_type(str, OBJ_TYPE_STRING);
+    str[DATA_START_INDEX] = (word)n;
+    for (size_t i = 0; i < n; i++)
+        string_set(str, i, vector_elem(vhdr, start + i));
+    return ptr_to_word(str);
+}
