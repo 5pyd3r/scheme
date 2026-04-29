@@ -56,6 +56,13 @@
       (if (eq? key (car (car alist))) (cdr (car alist))
           (_assq-lookup key (cdr alist)))))
 
+;; Top-level macro expansion — called from C trampoline, not from _compile-expr
+(define (_expand-once form)
+  (if (pair? form)
+      (let ((t (_lookup-macro (car form))))
+        (if t (eval (list t (list 'quote form))) form))
+      form))
+
 ;; Macro expansion helper — must be before _compile-expr (forward ref issue)
 (define (_expand-and-compile form cb cs)
   (_compile-expr (eval (list (_lookup-macro (car form)) (list 'quote form))) cb cs))

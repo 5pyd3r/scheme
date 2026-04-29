@@ -58,6 +58,10 @@ static void repl(void) {
 
         vm->error_kind = ERR_NONE;
         word result;
+        /* Expand macros before compilation */
+        if (use_scheme) {
+            expr = scheme_expand_macro(vm, expr);
+        }
         if (use_scheme) {
             int ci = scheme_compile_and_assemble(vm, expr);
             if (ci >= 0) {
@@ -108,6 +112,11 @@ static int exec_file(const char* path, int use_scheme) {
             break;
         }
         if (is_eof(expr)) break;
+
+        /* Expand macros before compilation */
+        if (use_scheme) {
+            expr = scheme_expand_macro(vm, expr);
+        }
 
         if (use_scheme) {
             int ci = scheme_compile_and_assemble(vm, expr);

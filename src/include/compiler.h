@@ -8,5 +8,6 @@ word compile_expr(vm_state_t* vm, word expr);
 
 word compile_program(vm_state_t* vm, word exprs);
 int scheme_compile_and_assemble(vm_state_t* vm, word expr);
+word scheme_expand_macro(vm_state_t* vm, word expr);
 
 #endif

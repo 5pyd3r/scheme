@@ -827,3 +827,48 @@ int scheme_compile_and_assemble(vm_state_t* vm, word expr) {
         return (int)word_to_fixnum(result);
     return -1;
 }
+
+/* Expand a top-level macro call via _expand-once.
+   Returns the expanded expression, or the original if not a macro. */
+word scheme_expand_macro(vm_state_t* vm, word expr) {
+    int expand_slot = vm_find_global_by_name(vm, "_expand-once");
+    if (expand_slot < 0) return expr;
+
+    uint8_t bc[16];
+    int len = 0;
+    bc[len++] = OP_PUSH_CONST; bc[len++] = 0;
+    bc[len++] = OP_GREF;       bc[len++] = (uint8_t)expand_slot;
+    bc[len++] = OP_CALL;       bc[len++] = 1;
+    bc[len++] = OP_HALT;
+
+    size_t bc_words = ((size_t)len + sizeof(word) - 1) / sizeof(word);
+    size_t total = 3 + bc_words + 1;
+    word* obj = vm->gc->alloc_words(total);
+    obj_set_type(obj, OBJ_TYPE_CODE);
+    obj[2] = (word)len;
+    memcpy(obj + 3, bc, (size_t)len);
+    obj[3 + bc_words] = expr;
+
+    int idx = vm_load_code(vm, obj);
+    if (idx < 0) return expr;
+
+    /* Save VM state before executing the expander */
+    word* saved_sp = vm->sp;
+    uint8_t* saved_ip = vm->ip;
+    word* saved_fp = vm->fp;
+    word* saved_env = vm->env;
+    word* saved_current = vm->current_code;
+
+    word result = vm_execute(vm, idx);
+
+    /* Restore VM state */
+    vm->sp = saved_sp;
+    vm->ip = saved_ip;
+    vm->fp = saved_fp;
+    vm->env = saved_env;
+    vm->current_code = saved_current;
+
+    if (is_ptr(result)) return result;
+    if (is_fixnum(result)) return result;
+    return expr;
+}
