@@ -65,7 +65,7 @@
                       (if (eq? (car expr) 'define-syntax)
                           (_compile-define-syntax (cdr expr) cb cs)
                           (if (_lookup-macro (car expr))
-                              (_compile-expr ((_lookup-macro (car expr)) expr) cb cs)
+                              (_cb-mark-error! cb)
                               (if (_is-handled? (car expr))
                                   (if (eq? (car expr) 'begin) (_compile-begin (cdr expr) cb cs)
                                       (begin (_compile-args (cdr expr) cb cs) (_emit-byte! cb OP-PRIM-CALL) (_emit-byte! cb (_count-exprs (cdr expr))) (_emit-byte! cb (remainder (prim-index (car expr)) 256)) (_emit-byte! cb (quotient (prim-index (car expr)) 256))))
@@ -169,10 +169,14 @@
 (define (_sr-helper macro-id clauses literals)
   (_make-transformer macro-id clauses literals (cons 0 '())))
 
-(define (syntax-rules literals clauses)
+(define (_sr-increment-and-create clauses literals)
   (begin
     (set-car! _macro-id-cell (+ (car _macro-id-cell) 1))
     (_sr-helper (- (car _macro-id-cell) 1) clauses literals)))
+
+(define syntax-rules
+  (lambda (literals clauses)
+    (_sr-increment-and-create clauses literals)))
 
 ;; === Main entry ===
 (define (compile expr) (let ((cb (_make-cb)) (cs (_make-consts))) (_compile-expr expr cb cs) (if (_cb-is-error? cb) #f (begin (_emit-byte! cb 255) (cons (_cb->list cb) (_cs->list cs))))))
