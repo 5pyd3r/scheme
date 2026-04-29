@@ -1007,6 +1007,22 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         return;
     }
 
+    if (is_symbol(fn, "letrec") || is_symbol(fn, "letrec*")) {
+        // Desugar (letrec ((var val) ...) body ...) to (let ((var val) ...) body ...)
+        word bindings = pair_car(ptr_from_word(args));
+        word body_list = pair_cdr(ptr_from_word(args));
+        word* lsym = vm->gc->alloc_words(3 + 3); obj_set_type(lsym, OBJ_TYPE_SYMBOL);
+        lsym[DATA_START_INDEX] = (word)3;
+        for (int li = 0; li < 3; li++)
+            string_set(lsym, li, word_from_char((unsigned char)"let"[li]));
+        word* new_args = vm->gc->alloc_words(4); obj_set_type(new_args, OBJ_TYPE_PAIR);
+        pair_car(new_args) = bindings; pair_cdr(new_args) = body_list;
+        word* let_form = vm->gc->alloc_words(4); obj_set_type(let_form, OBJ_TYPE_PAIR);
+        pair_car(let_form) = ptr_to_word(lsym); pair_cdr(let_form) = ptr_to_word(new_args);
+        compile_list(buf, vm, ptr_to_word(let_form), scope, env);
+        return;
+    }
+
     if (is_symbol(fn, "let")) {
         word* ahdr = ptr_from_word(args);
         word first = pair_car(ahdr);
