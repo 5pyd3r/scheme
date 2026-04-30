@@ -58,6 +58,7 @@ static void repl(void) {
 
         vm->error_kind = ERR_NONE;
         word result;
+        word* saved_sp = vm->sp;  // stabilize stack across nested vm_execute
         /* Expand macros before compilation */
         if (use_scheme) {
             expr = scheme_expand_macro(vm, expr);
@@ -76,7 +77,8 @@ static void repl(void) {
             result = vm_execute(vm, ci);
         }
 
-        vm->sp[0] = result;
+        vm->sp = saved_sp;         // restore stack pointer
+        *++vm->sp = result;        // push result onto clean stack
         prim_display(vm, 1);
         printf("\n");
     }
@@ -113,6 +115,7 @@ static int exec_file(const char* path, int use_scheme) {
         }
         if (is_eof(expr)) break;
 
+        word* saved_sp = vm->sp;  // stabilize stack across actions
         /* Expand macros before compilation */
         if (use_scheme) {
             expr = scheme_expand_macro(vm, expr);
@@ -122,6 +125,7 @@ static int exec_file(const char* path, int use_scheme) {
             int ci = scheme_compile_and_assemble(vm, expr);
             if (ci >= 0) {
                 vm_execute(vm, ci);
+                vm->sp = saved_sp;  // restore stack
                 continue;
             }
             use_scheme = 0;   /* fall back */
@@ -129,6 +133,7 @@ static int exec_file(const char* path, int use_scheme) {
         word code_obj = compile_expr(vm, expr);
         int ci = vm_load_code(vm, ptr_from_word(code_obj));
         vm_execute(vm, ci);
+        vm->sp = saved_sp;  // restore stack
     }
 
     return 0;

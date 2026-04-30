@@ -1412,7 +1412,9 @@ int scheme_compile_and_assemble(vm_state_t* vm, word expr) {
     int idx = vm_load_code(vm, obj);
     if (idx < 0) return -1;
 
+    word* saved_sp = vm->sp;    // stabilize stack
     word result = vm_execute(vm, idx);
+    vm->sp = saved_sp;           // restore
     if (is_fixnum(result))
         return (int)word_to_fixnum(result);
     return -1;
