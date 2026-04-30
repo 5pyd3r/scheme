@@ -1450,6 +1450,8 @@ word scheme_expand_macro(vm_state_t* vm, word expr) {
     word* saved_fp = vm->fp;
     word* saved_env = vm->env;
     word* saved_current = vm->current_code;
+    int saved_error_kind = vm->error_kind;
+    const char* saved_error_msg = vm->error_msg;
 
     word result = vm_execute(vm, idx);
 
@@ -1459,6 +1461,8 @@ word scheme_expand_macro(vm_state_t* vm, word expr) {
     vm->fp = saved_fp;
     vm->env = saved_env;
     vm->current_code = saved_current;
+    vm->error_kind = saved_error_kind;
+    vm->error_msg = saved_error_msg;
 
     if (is_ptr(result)) return result;
     if (is_fixnum(result)) return result;
