@@ -1798,3 +1798,19 @@ git add -A
 git diff --cached --stat
 git commit -m "fix: final adjustments from integration testing"
 ```
+
+## R7RS Gap Analysis (2026-04-29)
+
+### Quick Wins (simple C primitives)
+caar..cddddr, list-set!/list-copy/make-list, memv/assv/assoc,
+string>?/string<=?/string>=?, string-fill!, vector-copy/vector-fill/vector-append,
+bytevector-copy, expt, char-upcase/downcase/digit-value, symbol=?/boolean=?,
+eof-object?, member, read-char/write-char/peek-char
+
+### Design Needed (S-expr construction bugs)
+letrec, case, do, quasiquote (reader+compiler), dotted-tail lambda
+
+### Complex Subsystems
+call/cc, values/call-with-values, delay/force, dynamic-wind,
+let-syntax/letrec-syntax, exceptions, complex numbers, module system,
+ports/I/O, string-map/for-each, vector-map/for-each, environments, system interface

@@ -40,6 +40,7 @@ typedef struct vm_state {
     size_t  symbol_capacity;
 
     bool    gc_active;
+    int     gensym_counter;
 } vm_state_t;
 
 vm_state_t* vm_init(gc_interface* gc, pal_interface* pal);

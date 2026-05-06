@@ -178,6 +178,18 @@
   (lambda (proc vec)
     (_vmap proc vec (make-vector (vector-length vec) #f) 0)))
 
+(define _vfe
+  (lambda (proc vec i)
+    (if (< i (vector-length vec))
+        (begin
+          (proc (vector-ref vec i))
+          (_vfe proc vec (+ i 1)))
+        #f)))
+
+(define vector-for-each
+  (lambda (proc vec)
+    (_vfe proc vec 0)))
+
 ; ==================== Character predicates ====================
 
 (define char-alphabetic?
@@ -308,6 +320,22 @@
   (lambda (s)
     (_str-map char-downcase s (make-string (string-length s) #\space) 0)))
 
+(define string-map
+  (lambda (proc s)
+    (_str-map proc s (make-string (string-length s) #\space) 0)))
+
+(define _sfe
+  (lambda (proc s i)
+    (if (< i (string-length s))
+        (begin
+          (proc (string-ref s i))
+          (_sfe proc s (+ i 1)))
+        #f)))
+
+(define string-for-each
+  (lambda (proc s)
+    (_sfe proc s 0)))
+
 ; ==================== Bytevector library ====================
 
 (define _bv-cpy
@@ -340,3 +368,35 @@
   (lambda (a b)
     (_bv-app a b (bytevector-length a) (bytevector-length b)
              (make-bytevector (+ (bytevector-length a) (bytevector-length b)) 0))))
+
+;; ============================================================
+;; Macro table — populated by define-syntax in compiler.scm
+;; ============================================================
+
+;; Mutable cell: car holds the macro alist
+(define *macro-table* (cons '() '()))
+
+;; === map and for-each (Scheme implementations) ===
+(define (map proc lst)
+  (if (null? lst) '()
+      (cons (proc (car lst)) (map proc (cdr lst)))))
+
+(define (for-each proc lst)
+  (if (null? lst) 0
+      (begin (proc (car lst)) (for-each proc (cdr lst)))))
+
+
+;; === Derived expression types (R7RS macros) ===
+;; NOTE: define-syntax is handled by C compiler during Phase 1b loading.
+;; Clauses must be quoted since syntax-rules is a function, not a special form.
+
+;; letrec is handled by C compiler as a special form (compiler.c line 1019).
+;; Scheme macro version disabled due to compound-ellipsis corruption (Issue 2).
+
+;; case is handled by C compiler as a special form.
+
+(define-syntax when
+  (syntax-rules () '(((_ test body ...) (if test (begin body ...))))))
+
+(define-syntax unless
+  (syntax-rules () '(((_ test body ...) (if test #f (begin body ...))))))

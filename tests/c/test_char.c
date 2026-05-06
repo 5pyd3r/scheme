@@ -51,13 +51,13 @@ int main(void) {
     CHECK(is_char(ic), "integer->char 0x10FFFF ok");
     // Out of range
     vm->sp[0] = word_from_fixnum(-1);
-    vm->error_code = 0;
+    vm->error_kind = 0;
     ic = prim_integer_to_char(vm, 1);
-    CHECK(vm->error_code != 0, "integer->char -1 errors");
+    CHECK(vm->error_kind != 0, "integer->char -1 errors");
 
     // === char=? ===
     vm->sp[0] = word_from_char('A'); vm->sp[1] = word_from_char('A');
-    vm->error_code = 0;
+    vm->error_kind = 0;
     CHECK(prim_char_eq(vm, 2) == word_true(), "char=? A A");
     vm->sp[0] = word_from_char('A'); vm->sp[1] = word_from_char('B');
     CHECK(prim_char_eq(vm, 2) == word_false(), "char=? A B");

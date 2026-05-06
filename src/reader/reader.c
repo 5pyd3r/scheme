@@ -92,7 +92,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
             // Parse as flonum
             char buf[128];
             int len = end - start;
-            if (len >= 127) { vm->error_code = 1; return word_nil(); }
+            if (len >= 127) { vm->error_kind = 1; return word_nil(); }
             memcpy(buf, s + start, (size_t)len);
             buf[len] = '\0';
             *pos = end;
@@ -102,7 +102,7 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
             // Parse as integer (fixnum or bignum)
             char buf[64];
             int len = end - start;
-            if (len >= 63) { vm->error_code = 1; return word_nil(); }
+            if (len >= 63) { vm->error_kind = 1; return word_nil(); }
             memcpy(buf, s + start, (size_t)len);
             buf[len] = '\0';
             *pos = end;
@@ -129,6 +129,12 @@ static word read_atom(vm_state_t* vm, const char* s, int* pos) {
     return word_nil();
 }
 
+/* Return non-zero if c can be part of a Scheme symbol (after the first char). */
+static int is_sym_char(char c) {
+    return isalpha((unsigned char)c) || isdigit((unsigned char)c) ||
+           (c && strchr("!$%&*+-./:<=>?@^_~", c));
+}
+
 static word read_list_tail(vm_state_t* vm, const char* s, int* pos) {
     skip_ws(s, pos);
 
@@ -142,7 +148,9 @@ static word read_list_tail(vm_state_t* vm, const char* s, int* pos) {
     skip_ws(s, pos);
 
     word cdr;
-    if (s[*pos] == '.') {
+    /* Only treat "." as dotted-pair notation when it stands alone.
+       ". followed by a symbol char (e.g. "...", ".foo") is an identifier. */
+    if (s[*pos] == '.' && !is_sym_char(s[*pos + 1])) {
         (*pos)++;
         skip_ws(s, pos);
         cdr = read_expr(vm, s, pos);
@@ -205,6 +213,42 @@ static word read_expr(vm_state_t* vm, const char* s, int* pos) {
         obj_set_type(pair1, OBJ_TYPE_PAIR);
         word qsym = vm_intern(vm, "quote", 5);
         pair_car(pair1) = qsym;
+        pair_cdr(pair1) = ptr_to_word(pair2);
+        return ptr_to_word(pair1);
+    }
+    if (c == '`') {
+        (*pos)++;
+        word expr = read_expr(vm, s, pos);
+        word* pair2 = vm->gc->alloc_words(4);
+        obj_set_type(pair2, OBJ_TYPE_PAIR);
+        pair_car(pair2) = expr; pair_cdr(pair2) = word_nil();
+        word* pair1 = vm->gc->alloc_words(4);
+        obj_set_type(pair1, OBJ_TYPE_PAIR);
+        pair_car(pair1) = vm_intern(vm, "quasiquote", 10);
+        pair_cdr(pair1) = ptr_to_word(pair2);
+        return ptr_to_word(pair1);
+    }
+    if (c == ',' && s[*pos + 1] == '@') {
+        *pos += 2;
+        word expr = read_expr(vm, s, pos);
+        word* pair2 = vm->gc->alloc_words(4);
+        obj_set_type(pair2, OBJ_TYPE_PAIR);
+        pair_car(pair2) = expr; pair_cdr(pair2) = word_nil();
+        word* pair1 = vm->gc->alloc_words(4);
+        obj_set_type(pair1, OBJ_TYPE_PAIR);
+        pair_car(pair1) = vm_intern(vm, "unquote-splicing", 16);
+        pair_cdr(pair1) = ptr_to_word(pair2);
+        return ptr_to_word(pair1);
+    }
+    if (c == ',') {
+        (*pos)++;
+        word expr = read_expr(vm, s, pos);
+        word* pair2 = vm->gc->alloc_words(4);
+        obj_set_type(pair2, OBJ_TYPE_PAIR);
+        pair_car(pair2) = expr; pair_cdr(pair2) = word_nil();
+        word* pair1 = vm->gc->alloc_words(4);
+        obj_set_type(pair1, OBJ_TYPE_PAIR);
+        pair_car(pair1) = vm_intern(vm, "unquote", 7);
         pair_cdr(pair1) = ptr_to_word(pair2);
         return ptr_to_word(pair1);
     }

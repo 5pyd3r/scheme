@@ -3,6 +3,7 @@
 #include "gc.h"
 #include "vm.h"
 #include "debug.h"
+#include "compiler.h"
 #include "reader.h"
 #include "compiler.h"
 #include "prim.h"
@@ -25,42 +26,6 @@ vm_state_t*    vm;
  *   (assemble-code (compile expr))
  * and returns the resulting code index (fixnum).
  * ============================================================ */
-static int scheme_compile_and_assemble(vm_state_t* vm, word expr) {
-    int compile_slot = vm_find_global_by_name(vm, "compile");
-    if (compile_slot < 0) return -1;
-
-    int asm_idx = prim_lookup("assemble-code");
-    if (asm_idx < 0) return -1;
-
-    uint8_t bc[32];
-    int len = 0;
-    /* bytecodes: PUSH_CONST 0, GREF compile, CALL 1,
-     *            PRIM_CALL 1 <asm_idx>, HALT */
-    bc[len++] = OP_PUSH_CONST; bc[len++] = 0;
-    bc[len++] = OP_GREF;       bc[len++] = (uint8_t)compile_slot;
-    bc[len++] = OP_CALL;       bc[len++] = 1;
-    bc[len++] = OP_PRIM_CALL;  bc[len++] = 1;
-    bc[len++] = (uint8_t)(asm_idx & 0xFF);
-    bc[len++] = (uint8_t)((asm_idx >> 8) & 0xFF);
-    bc[len++] = OP_HALT;
-
-    /* build code object: [GC_hdr][type][len][bytes...][consts...] */
-    size_t bc_words = ((size_t)len + sizeof(word) - 1) / sizeof(word);
-    size_t total = 3 + bc_words + 1;   /* +1 for expr const */
-    word* obj = vm->gc->alloc_words(total);
-    obj_set_type(obj, OBJ_TYPE_CODE);
-    obj[2] = (word)len;
-    memcpy(obj + 3, bc, (size_t)len);
-    obj[3 + bc_words] = expr;          /* const[0] = expr */
-
-    int idx = vm_load_code(vm, obj);
-    if (idx < 0) return -1;
-
-    word result = vm_execute(vm, idx);
-    if (is_fixnum(result))
-        return (int)word_to_fixnum(result);
-    return -1;
-}
 
 /* ============================================================
  * REPL — tries Scheme compiler first, falls back to C compiler
@@ -93,21 +58,28 @@ static void repl(void) {
 
         vm->error_kind = ERR_NONE;
         word result;
+        word* saved_sp = vm->sp;  // stabilize stack across nested vm_execute
+        /* Expand macros before compilation */
+        if (use_scheme) {
+            expr = scheme_expand_macro(vm, expr);
+        }
         if (use_scheme) {
             int ci = scheme_compile_and_assemble(vm, expr);
             if (ci >= 0) {
                 result = vm_execute(vm, ci);
             } else {
-                use_scheme = 0;   /* fall back to C compiler */
+                word code_obj = compile_expr(vm, expr);
+                int ci = vm_load_code(vm, ptr_from_word(code_obj));
+                result = vm_execute(vm, ci);
             }
-        }
-        if (!use_scheme) {
+        } else {
             word code_obj = compile_expr(vm, expr);
             int ci = vm_load_code(vm, ptr_from_word(code_obj));
             result = vm_execute(vm, ci);
         }
 
-        vm->sp[0] = result;
+        vm->sp = saved_sp;         // restore stack pointer
+        *++vm->sp = result;        // push result onto clean stack
         prim_display(vm, 1);
         printf("\n");
     }
@@ -144,17 +116,26 @@ static int exec_file(const char* path, int use_scheme) {
         }
         if (is_eof(expr)) break;
 
+        word* saved_sp = vm->sp;  // stabilize stack across actions
+        /* Expand macros before compilation (always, even if Scheme compile fails) */
+        if (use_scheme) {
+            expr = scheme_expand_macro(vm, expr);
+        }
+
         if (use_scheme) {
             int ci = scheme_compile_and_assemble(vm, expr);
             if (ci >= 0) {
                 vm_execute(vm, ci);
+                vm->sp = saved_sp;  // restore stack
                 continue;
             }
-            use_scheme = 0;   /* fall back */
+            /* Scheme compile failed — fall through to C compiler.
+               Keep use_scheme=1 so macro expansion still works for next expr. */
         }
         word code_obj = compile_expr(vm, expr);
         int ci = vm_load_code(vm, ptr_from_word(code_obj));
         vm_execute(vm, ci);
+        vm->sp = saved_sp;  // restore stack
     }
 
     return 0;

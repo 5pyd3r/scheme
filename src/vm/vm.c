@@ -5,11 +5,46 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Forward declaration -- defined in builtins.c (Task 6)
+// Forward declarations
 word vm_dispatch_prim(vm_state_t* vm, int prim_index, int nargs);
+void vm_restore_continuation(vm_state_t* vm, word cont_word, int nargs_val);
 
 #define INITIAL_STACK_WORDS (64 * 1024)
 #define INITIAL_GLOBALS     (256)
+
+static void vm_mark_roots(void* state) {
+    vm_state_t* vm = (vm_state_t*)state;
+    gc_interface* gc = vm->gc;
+    if (!gc) return;
+
+    // Mark all words on the active stack
+    for (word* p = vm->stack; p <= vm->sp; p++)
+        gc->mark_root(*p);
+
+    // Mark raw-pointers held in VM registers
+    if (vm->env)         gc->mark_root(ptr_to_word(vm->env));
+    if (vm->current_code) gc->mark_root(ptr_to_word(vm->current_code));
+    gc->mark_root(vm->acc);
+
+    // Mark all loaded code objects
+    for (size_t i = 0; i < vm->code_count; i++) {
+        if (vm->code_objects[i])
+            gc->mark_root(ptr_to_word(vm->code_objects[i]));
+    }
+
+    // Mark all globals and their names
+    for (int i = 0; i < vm->next_global_slot; i++) {
+        gc->mark_root(vm->globals[i]);
+        gc->mark_root(vm->global_names[i]);
+    }
+
+    // Mark symbol table
+    for (size_t i = 0; i < vm->symbol_count; i++)
+        gc->mark_root(vm->symbol_table[i]);
+
+    // Mark error arg
+    gc->mark_root(vm->error_arg);
+}
 
 vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm_state_t* vm = (vm_state_t*)calloc(1, sizeof(vm_state_t));
@@ -32,6 +67,9 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm->symbol_table = NULL;
     vm->symbol_count = 0;
     vm->symbol_capacity = 0;
+    vm->gensym_counter = 0;
+
+    gc->set_root_marker(vm_mark_roots, vm);
 
     return vm;
 }
@@ -253,6 +291,57 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             break;
         }
 
+        case OP_CALL_CC: {
+            uint8_t nargs = read_u8(&vm->ip);
+            word cc_proc = *vm->sp;
+
+            DASSERT_TYPE(cc_proc, OBJ_TYPE_CLOSURE);
+
+            // Allocate continuation object: 3 header + 5 data words
+            word* cont = vm->gc->alloc_words(3 + 5);
+            obj_set_type(cont, OBJ_TYPE_CONTINUATION);
+            cont[DATA_START_INDEX + 0] = (word)(vm->sp - 1 - vm->stack);
+            cont[DATA_START_INDEX + 1] = (word)(vm->fp - vm->stack);
+            cont[DATA_START_INDEX + 2] = (word)(uintptr_t)vm->ip;
+            cont[DATA_START_INDEX + 3] = (word)(uintptr_t)vm->current_code;
+            cont[DATA_START_INDEX + 4] = (word)(uintptr_t)vm->env;
+
+            // Replace proc on stack with continuation object
+            *vm->sp = ptr_to_word(cont);
+
+            // Perform CALL with the saved proc and 1 arg (the continuation)
+            word* clo = ptr_from_word(cc_proc);
+            word nfree_word = clo[DATA_START_INDEX + 2];
+            uint8_t nfree = (uint8_t)(nfree_word & 0xFF);
+            word* base = vm->sp;
+
+            word old_sp = (word)(uintptr_t)(base - 1);
+
+            // Shift single arg past frame header + free vars
+            base[4 + nfree] = base[0];
+
+            // Frame header
+            base[0] = old_sp;
+            base[1] = (word)(uintptr_t)vm->ip;
+            base[2] = (word)(uintptr_t)vm->env;
+            base[3] = (word)(uintptr_t)vm->fp;
+
+            // Unpack free variables
+            if (nfree > 0) {
+                word* env_vec = ptr_from_word(closure_env(clo));
+                for (int i = 0; i < nfree; i++)
+                    base[4 + i] = env_vec[DATA_START_INDEX + 1 + i];
+            }
+
+            // Set new frame
+            vm->fp = base + 3;
+            vm->env = ptr_from_word(closure_env(clo));
+            vm->sp = base + 4 + nargs + nfree;
+            vm->current_code = ptr_from_word(closure_code(clo));
+            vm->ip = code_bytes(vm->current_code);
+            break;
+        }
+
         case OP_PRIM_CALL: {
             uint8_t nargs = read_u8(&vm->ip);
             uint16_t prim_idx = read_u16(&vm->ip);
@@ -263,10 +352,117 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             break;
         }
 
+        case OP_APPLY: {
+            uint8_t nargs = read_u8(&vm->ip);
+            // Save original sp (before any adjustment)
+            word* orig_sp = vm->sp;  // points to last arg (list)
+            vm->sp -= (nargs - 1);  // sp now at closure (first arg)
+            word closure = vm->sp[0];
+            int nindividual = nargs - 2;
+            word list_arg = vm->sp[nargs - 1];
+            // Count list elements
+            int list_len = 0;
+            word cur = list_arg;
+            while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR) {
+                list_len++;
+                cur = pair_cdr(ptr_from_word(cur));
+            }
+            if (!is_nil(cur)) {
+                vm->error_kind = ERR_TYPE;
+                vm->error_msg = "apply: last argument must be a proper list";
+                return word_nil();
+            }
+            int total_args = nindividual + list_len;
+            // Save individual args and list elements locally, then rebuild stack
+            word saved_individual[128];
+            word saved_list[1024];
+            for (int i = 0; i < nindividual && i < 128; i++)
+                saved_individual[i] = vm->sp[1 + i];
+            cur = list_arg;
+            for (int i = 0; i < list_len && i < 1024; i++) {
+                saved_list[i] = pair_car(ptr_from_word(cur));
+                cur = pair_cdr(ptr_from_word(cur));
+            }
+            // Reset sp: go BEFORE the first apply arg pushed by compiler
+            // orig_sp was at last arg; there are nargs total args.
+            vm->sp = orig_sp - nargs;
+            // Push all call args LEFT TO RIGHT: individual args, then list elements
+            for (int i = 0; i < nindividual; i++)
+                *++vm->sp = saved_individual[i];
+            for (int i = 0; i < list_len; i++)
+                *++vm->sp = saved_list[i];
+            // Push closure (top of stack)
+            *++vm->sp = closure;
+            // Compute base pointer (used by both prim and closure paths)
+            word* base = vm->sp - total_args;
+            // Check if "closure" is actually a primitive fixnum index
+            if (is_fixnum(closure)) {
+                int pidx = (int)word_to_fixnum(closure);
+                word* saved_sp = vm->sp;
+                vm->sp = base + total_args - 1;  // point to last arg
+                vm->sp -= (total_args - 1);       // adjust to first arg
+                word result = vm_dispatch_prim(vm, pidx, total_args);
+                vm->sp = saved_sp;  // restore to closure position
+                *vm->sp = result;   // replace closure with result
+                break;
+            }
+            // Regular closure call (similar to OP_CALL frame setup)
+            word* clo2 = ptr_from_word(closure);
+            word nfree_word2 = clo2[DATA_START_INDEX + 2];
+            uint8_t nfree2 = (uint8_t)(nfree_word2 & 0xFF);
+            int is_dotted2 = (nfree_word2 & 0x8000UL) ? 1 : 0;
+            int nfixed2 = is_dotted2 ? (int)(clo2[DATA_START_INDEX + 3]) : 0;
+
+            // Build rest list for dotted-tail
+            word rest_list2 = word_nil();
+            int effective_args = total_args;
+            if (is_dotted2) {
+                if (total_args > nfixed2) {
+                    for (int i = total_args - 1; i >= nfixed2; i--) {
+                        word* p = vm->gc->alloc_words(4);
+                        obj_set_type(p, OBJ_TYPE_PAIR);
+                        pair_car(p) = base[i];
+                        pair_cdr(p) = rest_list2;
+                        rest_list2 = ptr_to_word(p);
+                    }
+                }
+                effective_args = nfixed2 + 1;
+            }
+
+            word old_sp2 = (word)(uintptr_t)(base - 1);
+            if (is_dotted2) {
+                for (int i = nfixed2 - 1; i >= 0; i--)
+                    base[i + 4 + nfree2] = base[i];
+                base[4 + nfree2 + nfixed2] = rest_list2;
+            } else {
+                for (int i = total_args - 1; i >= 0; i--)
+                    base[i + 4 + nfree2] = base[i];
+            }
+            base[0] = old_sp2;
+            base[1] = (word)(uintptr_t)vm->ip;
+            base[2] = (word)(uintptr_t)vm->env;
+            base[3] = (word)(uintptr_t)vm->fp;
+            if (nfree2 > 0) {
+                word* env_vec = ptr_from_word(closure_env(clo2));
+                for (int i = 0; i < nfree2; i++)
+                    base[4 + i] = env_vec[DATA_START_INDEX + 1 + i];
+            }
+            vm->fp = base + 3;
+            vm->env = ptr_from_word(closure_env(clo2));
+            vm->sp = base + 4 + effective_args + nfree2;
+            vm->current_code = ptr_from_word(closure_code(clo2));
+            vm->ip = code_bytes(vm->current_code);
+            break;
+        }
+
         case OP_CLOSE: {
             uint16_t code_idx = read_u16(&vm->ip);
             uint8_t nfree = read_u8(&vm->ip);
-            word* clo = vm->gc->alloc_words(5);
+            uint8_t nfixed_byte = read_u8(&vm->ip);
+            int is_dotted = (nfixed_byte & 0x80) ? 1 : 0;
+            int nfixed = nfixed_byte & 0x7F;
+            int closure_words = 5 + is_dotted;
+            word* clo = vm->gc->alloc_words(closure_words);
             obj_set_type(clo, OBJ_TYPE_CLOSURE);
             closure_code(clo) = ptr_to_word(vm->code_objects[code_idx]);
             if (nfree > 0) {
@@ -279,7 +475,11 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             } else {
                 closure_env(clo) = 0;
             }
-            clo[DATA_START_INDEX + 2] = (word)nfree;
+            // Store nfree with dotted flag in high bits
+            clo[DATA_START_INDEX + 2] = (word)nfree | (is_dotted ? 0x8000UL : 0);
+            if (is_dotted) {
+                clo[DATA_START_INDEX + 3] = (word)nfixed;
+            }
             *++vm->sp = ptr_to_word(clo);
             break;
         }
@@ -287,16 +487,53 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
         case OP_CALL: {
             uint8_t nargs = read_u8(&vm->ip);
             // Args compiled first, then closure on top: sp[-nargs+1..0] = args, sp[0] = closure
+            // Check if invoking a continuation
+            if (is_ptr(*vm->sp)) {
+                word* called = ptr_from_word(*vm->sp);
+                if (obj_type(called) == OBJ_TYPE_CONTINUATION) {
+                    vm_restore_continuation(vm, *vm->sp, nargs);
+                    break;
+                }
+            }
             word* clo = ptr_from_word(*vm->sp);
-            uint8_t nfree = (uint8_t)(clo[DATA_START_INDEX + 2]);
+            word nfree_word = clo[DATA_START_INDEX + 2];
+            uint8_t nfree = (uint8_t)(nfree_word & 0xFF);
+            int is_dotted = (nfree_word & 0x8000UL) ? 1 : 0;
+            int nfixed = is_dotted ? (int)(clo[DATA_START_INDEX + 3]) : 0;
             word* base = vm->sp - nargs;  // base[0..nargs-1] = args
+
+            // For dotted-tail, collect extra args into a list and treat as single arg
+            word rest_list = word_nil();
+            int effective_nargs = nargs;
+            if (is_dotted && nargs > nfixed) {
+                // Build list from extra args (last nrest args)
+                // Extra args are base[nfixed..nargs-1], build list in reverse
+                for (int i = nargs - 1; i >= nfixed; i--) {
+                    word* p = vm->gc->alloc_words(4);
+                    obj_set_type(p, OBJ_TYPE_PAIR);
+                    pair_car(p) = base[i];
+                    pair_cdr(p) = rest_list;
+                    rest_list = ptr_to_word(p);
+                }
+                effective_nargs = nfixed + 1; // nfixed regular args + rest list
+            }
 
             // Save caller sp (restore to before first arg, so frame header is overwritten)
             word old_sp = (word)(uintptr_t)(base - 1);
 
-            // Shift args (base[0..nargs-1]) to base[4+nfree..nargs+4+nfree-1]
-            for (int i = nargs - 1; i >= 0; i--)
-                base[i + 4 + nfree] = base[i];
+            // Shift args to make room for frame header + captured vars
+            if (is_dotted) {
+                // Dotted-tail: shift nfixed fixed args, write rest_list as last arg
+                for (int i = nfixed - 1; i >= 0; i--)
+                    base[i + 4 + nfree] = base[i];
+                base[4 + nfree + nfixed] = rest_list;
+                effective_nargs = nfixed + 1;
+            } else {
+                // Normal shift: all nargs args
+                for (int i = nargs - 1; i >= 0; i--)
+                    base[i + 4 + nfree] = base[i];
+                effective_nargs = nargs;
+            }
 
             // Save frame header (4 words) — base[0..3]
             base[0] = old_sp;
@@ -314,7 +551,7 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             // Set new frame
             vm->fp = base + 3;  // fp[0]=saved_fp, fp[1]=first captured var (if nfree>0), fp[1+nfree]=arg1
             vm->env = ptr_from_word(closure_env(clo));
-            vm->sp = base + 4 + nargs + nfree;  // point past last arg
+            vm->sp = base + 4 + effective_nargs + nfree;  // point past last arg
 
             vm->current_code = ptr_from_word(closure_code(clo));
             vm->ip = code_bytes(vm->current_code);
