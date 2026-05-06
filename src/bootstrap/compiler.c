@@ -1026,15 +1026,70 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
     }
 
     if (is_symbol(fn, "letrec") || is_symbol(fn, "letrec*")) {
-        // Desugar (letrec ((var val) ...) body ...) to (let ((var val) ...) body ...)
+        // Inline compilation with temporary global slots for self/mutual reference.
+        // (letrec ((var val) ...) body ...)
+        //   1. Create global slots for each var (so lambdas can GREF them)
+        //   2. Compile each val (lambda GREFs resolve to the slot, initially nil)
+        //   3. GSET each closure to its slot, then POP
+        //   4. Compile body
         word bindings = pair_car(ptr_from_word(args));
         word body_list = pair_cdr(ptr_from_word(args));
-        word let_sym = make_sym(vm, "let");
-        word* new_args = vm->gc->alloc_words(4); obj_set_type(new_args, OBJ_TYPE_PAIR);
-        pair_car(new_args) = bindings; pair_cdr(new_args) = body_list;
-        word* let_form = vm->gc->alloc_words(4); obj_set_type(let_form, OBJ_TYPE_PAIR);
-        pair_car(let_form) = let_sym; pair_cdr(let_form) = ptr_to_word(new_args);
-        compile_list(buf, vm, ptr_to_word(let_form), scope, env);
+
+        // Collect binding info and create global slots
+        int slots[32], nvars = 0;
+        word cur = bindings;
+        while (is_ptr(cur) && obj_type(ptr_from_word(cur)) == OBJ_TYPE_PAIR && nvars < 32) {
+            word* bhdr = ptr_from_word(pair_car(ptr_from_word(cur)));
+            word var = pair_car(bhdr);
+            int slot = vm_find_global_slot(vm, var);
+            if (slot < 0) {
+                if (vm->next_global_slot >= (int)vm->global_count) {
+                    size_t nc = vm->global_count * 2;
+                    vm->globals = realloc(vm->globals, nc * sizeof(word));
+                    vm->global_names = realloc(vm->global_names, nc * sizeof(word));
+                    vm->global_count = nc;
+                }
+                slot = vm->next_global_slot++;
+                vm->global_names[slot] = var;
+            }
+            slots[nvars++] = slot;
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+
+        // Compile each RHS val
+        cur = bindings;
+        for (int i = 0; i < nvars; i++) {
+            word* bhdr = ptr_from_word(pair_car(ptr_from_word(cur)));
+            word val = pair_car(ptr_from_word(pair_cdr(bhdr)));
+            compile_expr_to_buf(buf, vm, val, scope, env);
+            cur = pair_cdr(ptr_from_word(cur));
+        }
+
+        // GSET each closure and POP to clean stack (reverse order)
+        for (int i = nvars - 1; i >= 0; i--) {
+            emit_byte(buf, OP_GSET);
+            emit_byte(buf, (uint8_t)slots[i]);
+            emit_byte(buf, OP_POP);
+        }
+
+        // Compile body
+        if (is_nil(body_list)) {
+            emit_byte(buf, OP_PUSH_NIL);
+        } else {
+            word bcur = body_list;
+            int bcount = 0;
+            while (is_ptr(bcur) && obj_type(ptr_from_word(bcur)) == OBJ_TYPE_PAIR) {
+                bcount++;
+                bcur = pair_cdr(ptr_from_word(bcur));
+            }
+            bcur = body_list;
+            for (int i = 0; i < bcount - 1; i++) {
+                compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(bcur)), scope, env);
+                emit_byte(buf, OP_POP);
+                bcur = pair_cdr(ptr_from_word(bcur));
+            }
+            compile_expr_to_buf(buf, vm, pair_car(ptr_from_word(bcur)), scope, env);
+        }
         return;
     }
 
