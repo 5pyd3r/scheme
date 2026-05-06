@@ -11,6 +11,40 @@ word vm_dispatch_prim(vm_state_t* vm, int prim_index, int nargs);
 #define INITIAL_STACK_WORDS (64 * 1024)
 #define INITIAL_GLOBALS     (256)
 
+static void vm_mark_roots(void* state) {
+    vm_state_t* vm = (vm_state_t*)state;
+    gc_interface* gc = vm->gc;
+    if (!gc) return;
+
+    // Mark all words on the active stack
+    for (word* p = vm->stack; p <= vm->sp; p++)
+        gc->mark_root(*p);
+
+    // Mark raw-pointers held in VM registers
+    if (vm->env)         gc->mark_root(ptr_to_word(vm->env));
+    if (vm->current_code) gc->mark_root(ptr_to_word(vm->current_code));
+    gc->mark_root(vm->acc);
+
+    // Mark all loaded code objects
+    for (size_t i = 0; i < vm->code_count; i++) {
+        if (vm->code_objects[i])
+            gc->mark_root(ptr_to_word(vm->code_objects[i]));
+    }
+
+    // Mark all globals and their names
+    for (int i = 0; i < vm->next_global_slot; i++) {
+        gc->mark_root(vm->globals[i]);
+        gc->mark_root(vm->global_names[i]);
+    }
+
+    // Mark symbol table
+    for (size_t i = 0; i < vm->symbol_count; i++)
+        gc->mark_root(vm->symbol_table[i]);
+
+    // Mark error arg
+    gc->mark_root(vm->error_arg);
+}
+
 vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm_state_t* vm = (vm_state_t*)calloc(1, sizeof(vm_state_t));
     vm->gc = gc;
@@ -33,6 +67,8 @@ vm_state_t* vm_init(gc_interface* gc, pal_interface* pal) {
     vm->symbol_count = 0;
     vm->symbol_capacity = 0;
     vm->gensym_counter = 0;
+
+    gc->set_root_marker(vm_mark_roots, vm);
 
     return vm;
 }
