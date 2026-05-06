@@ -16,8 +16,20 @@ static obj_entry_t* free_entries = NULL;
 static size_t total_words_allocated = 0;
 static bool collecting = false;
 
+static void (*gc_root_marker)(void*) = NULL;
+static void* gc_root_marker_state = NULL;
+
 static void gc_sweep(void);
 static void gc_collect(void);
+
+static void gc_set_root_marker(void (*fn)(void*), void* state) {
+    gc_root_marker = fn;
+    gc_root_marker_state = state;
+}
+
+static void* gc_state_ref(void) {
+    return NULL;
+}
 
 static obj_entry_t* entry_alloc(void) {
     if (free_entries) {
@@ -145,6 +157,9 @@ static void gc_sweep(void) {
 static void gc_collect(void) {
     if (collecting) return;
     collecting = true;
+    if (gc_root_marker) {
+        gc_root_marker(gc_root_marker_state);
+    }
     gc_sweep();
     collecting = false;
 }
@@ -159,6 +174,8 @@ gc_interface* gc_init(void) {
     gc.collect     = gc_collect;
     gc.mark_root   = gc_mark_root;
     gc.mark_stack  = gc_mark_stack;
-    gc.heap_used   = gc_heap_used;
+    gc.heap_used        = gc_heap_used;
+    gc.set_root_marker  = gc_set_root_marker;
+    gc.state_ref        = gc_state_ref;
     return &gc;
 }
