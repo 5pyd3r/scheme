@@ -68,10 +68,11 @@ static void repl(void) {
             if (ci >= 0) {
                 result = vm_execute(vm, ci);
             } else {
-                use_scheme = 0;   /* fall back to C compiler */
+                word code_obj = compile_expr(vm, expr);
+                int ci = vm_load_code(vm, ptr_from_word(code_obj));
+                result = vm_execute(vm, ci);
             }
-        }
-        if (!use_scheme) {
+        } else {
             word code_obj = compile_expr(vm, expr);
             int ci = vm_load_code(vm, ptr_from_word(code_obj));
             result = vm_execute(vm, ci);
@@ -116,7 +117,7 @@ static int exec_file(const char* path, int use_scheme) {
         if (is_eof(expr)) break;
 
         word* saved_sp = vm->sp;  // stabilize stack across actions
-        /* Expand macros before compilation */
+        /* Expand macros before compilation (always, even if Scheme compile fails) */
         if (use_scheme) {
             expr = scheme_expand_macro(vm, expr);
         }
@@ -128,7 +129,8 @@ static int exec_file(const char* path, int use_scheme) {
                 vm->sp = saved_sp;  // restore stack
                 continue;
             }
-            use_scheme = 0;   /* fall back */
+            /* Scheme compile failed — fall through to C compiler.
+               Keep use_scheme=1 so macro expansion still works for next expr. */
         }
         word code_obj = compile_expr(vm, expr);
         int ci = vm_load_code(vm, ptr_from_word(code_obj));
