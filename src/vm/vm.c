@@ -5,8 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Forward declaration -- defined in builtins.c (Task 6)
+// Forward declarations
 word vm_dispatch_prim(vm_state_t* vm, int prim_index, int nargs);
+void vm_restore_continuation(vm_state_t* vm, word cont_word, int nargs_val);
 
 #define INITIAL_STACK_WORDS (64 * 1024)
 #define INITIAL_GLOBALS     (256)
@@ -290,6 +291,57 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
             break;
         }
 
+        case OP_CALL_CC: {
+            uint8_t nargs = read_u8(&vm->ip);
+            word cc_proc = *vm->sp;
+
+            DASSERT_TYPE(cc_proc, OBJ_TYPE_CLOSURE);
+
+            // Allocate continuation object: 3 header + 5 data words
+            word* cont = vm->gc->alloc_words(3 + 5);
+            obj_set_type(cont, OBJ_TYPE_CONTINUATION);
+            cont[DATA_START_INDEX + 0] = (word)(vm->sp - 1 - vm->stack);
+            cont[DATA_START_INDEX + 1] = (word)(vm->fp - vm->stack);
+            cont[DATA_START_INDEX + 2] = (word)(uintptr_t)vm->ip;
+            cont[DATA_START_INDEX + 3] = (word)(uintptr_t)vm->current_code;
+            cont[DATA_START_INDEX + 4] = (word)(uintptr_t)vm->env;
+
+            // Replace proc on stack with continuation object
+            *vm->sp = ptr_to_word(cont);
+
+            // Perform CALL with the saved proc and 1 arg (the continuation)
+            word* clo = ptr_from_word(cc_proc);
+            word nfree_word = clo[DATA_START_INDEX + 2];
+            uint8_t nfree = (uint8_t)(nfree_word & 0xFF);
+            word* base = vm->sp;
+
+            word old_sp = (word)(uintptr_t)(base - 1);
+
+            // Shift single arg past frame header + free vars
+            base[4 + nfree] = base[0];
+
+            // Frame header
+            base[0] = old_sp;
+            base[1] = (word)(uintptr_t)vm->ip;
+            base[2] = (word)(uintptr_t)vm->env;
+            base[3] = (word)(uintptr_t)vm->fp;
+
+            // Unpack free variables
+            if (nfree > 0) {
+                word* env_vec = ptr_from_word(closure_env(clo));
+                for (int i = 0; i < nfree; i++)
+                    base[4 + i] = env_vec[DATA_START_INDEX + 1 + i];
+            }
+
+            // Set new frame
+            vm->fp = base + 3;
+            vm->env = ptr_from_word(closure_env(clo));
+            vm->sp = base + 4 + nargs + nfree;
+            vm->current_code = ptr_from_word(closure_code(clo));
+            vm->ip = code_bytes(vm->current_code);
+            break;
+        }
+
         case OP_PRIM_CALL: {
             uint8_t nargs = read_u8(&vm->ip);
             uint16_t prim_idx = read_u16(&vm->ip);
@@ -435,6 +487,14 @@ word vm_execute(vm_state_t* vm, int entry_idx) {
         case OP_CALL: {
             uint8_t nargs = read_u8(&vm->ip);
             // Args compiled first, then closure on top: sp[-nargs+1..0] = args, sp[0] = closure
+            // Check if invoking a continuation
+            if (is_ptr(*vm->sp)) {
+                word* called = ptr_from_word(*vm->sp);
+                if (obj_type(called) == OBJ_TYPE_CONTINUATION) {
+                    vm_restore_continuation(vm, *vm->sp, nargs);
+                    break;
+                }
+            }
             word* clo = ptr_from_word(*vm->sp);
             word nfree_word = clo[DATA_START_INDEX + 2];
             uint8_t nfree = (uint8_t)(nfree_word & 0xFF);
