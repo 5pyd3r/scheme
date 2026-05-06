@@ -26,6 +26,15 @@ static int add_const(code_buf_t* buf, word val) {
     return buf->nconsts++;
 }
 
+// Allocate a GC-managed pair
+static word mkpair(vm_state_t* vm, word car, word cdr) {
+    word* p = vm->gc->alloc_words(4);
+    obj_set_type(p, OBJ_TYPE_PAIR);
+    pair_car(p) = car;
+    pair_cdr(p) = cdr;
+    return ptr_to_word(p);
+}
+
 // Create an interned-like symbol (not added to global symbol table, only GC-allocated)
 static word make_sym(vm_state_t* vm, const char* name) {
     int len = (int)strlen(name);
@@ -1026,6 +1035,109 @@ static void compile_list(code_buf_t* buf, vm_state_t* vm, word expr, local_scope
         word* let_form = vm->gc->alloc_words(4); obj_set_type(let_form, OBJ_TYPE_PAIR);
         pair_car(let_form) = let_sym; pair_cdr(let_form) = ptr_to_word(new_args);
         compile_list(buf, vm, ptr_to_word(let_form), scope, env);
+        return;
+    }
+
+    if (is_symbol(fn, "do")) {
+        // Desugar (do ((var init step) ...) (test result ...) command ...)
+        //   → (let loop ((var init) ...) (if test (begin result ...) (begin command ... (loop step ...))))
+        word* ahdr = ptr_from_word(args);
+        word bindings = pair_car(ahdr);
+        word* rest = ptr_from_word(pair_cdr(ahdr));
+        word test_clause = pair_car(rest);
+        word body_list = pair_cdr(rest);
+
+        // Extract init values and step expressions; build param list
+        word param_list = word_nil(), init_list = word_nil(), step_pair_list = word_nil();
+        word *pprev = NULL, *iprev = NULL, *sprev = NULL;
+        word cur_b = bindings;
+        while (is_ptr(cur_b) && obj_type(ptr_from_word(cur_b)) == OBJ_TYPE_PAIR) {
+            word* bh = ptr_from_word(pair_car(ptr_from_word(cur_b)));
+            word param = pair_car(bh);
+            word* rest_bh = ptr_from_word(pair_cdr(bh));
+            word init_val = pair_car(rest_bh);
+            word step_val = pair_car(ptr_from_word(pair_cdr(rest_bh)));
+            word p = mkpair(vm, param, word_nil());
+            if (pprev) pair_cdr(pprev) = p; else param_list = p;
+            pprev = ptr_from_word(p);
+            word iv = mkpair(vm, init_val, word_nil());
+            if (iprev) pair_cdr(iprev) = iv; else init_list = iv;
+            iprev = ptr_from_word(iv);
+            word sv = mkpair(vm, step_val, word_nil());
+            if (sprev) pair_cdr(sprev) = sv; else step_pair_list = sv;
+            sprev = ptr_from_word(sv);
+            cur_b = pair_cdr(ptr_from_word(cur_b));
+        }
+
+        // Build (begin result ...)
+        word* tcdr = ptr_from_word(test_clause);
+        word test = pair_car(tcdr);
+        word results = pair_cdr(tcdr);
+        word result_expr;
+        if (is_nil(results)) {
+            result_expr = word_nil();
+        } else if (is_nil(pair_cdr(ptr_from_word(results)))) {
+            result_expr = pair_car(ptr_from_word(results));
+        } else {
+            result_expr = mkpair(vm, make_sym(vm, "begin"), results);
+        }
+
+        // Build (loop step ...)
+        word loop_sym = make_sym(vm, "_do_loop");
+        word loop_call = mkpair(vm, loop_sym, step_pair_list);
+
+        // Build else expression for if-form
+        word cmd_sym = make_sym(vm, "begin");
+        word else_expr;
+        if (is_nil(body_list)) {
+            else_expr = loop_call;  // just (loop step ...), unwrapped
+        } else {
+            word last = word_nil(), first = word_nil();
+            word cur_c = body_list;
+            while (is_ptr(cur_c) && obj_type(ptr_from_word(cur_c)) == OBJ_TYPE_PAIR) {
+                word cp = mkpair(vm, pair_car(ptr_from_word(cur_c)), word_nil());
+                if (is_ptr(last) && obj_type(ptr_from_word(last)) == OBJ_TYPE_PAIR)
+                    pair_cdr(ptr_from_word(last)) = cp;
+                else first = cp;
+                last = cp;
+                cur_c = pair_cdr(ptr_from_word(cur_c));
+            }
+            if (is_ptr(last) && obj_type(ptr_from_word(last)) == OBJ_TYPE_PAIR)
+                pair_cdr(ptr_from_word(last)) = mkpair(vm, loop_call, word_nil());
+            else first = mkpair(vm, loop_call, word_nil());
+            else_expr = mkpair(vm, cmd_sym, first);
+        }
+
+        // Build (if test result else_expr)
+        word if_sym = make_sym(vm, "if");
+        word else_branch = mkpair(vm, else_expr, word_nil());
+        word then_branch = mkpair(vm, result_expr, else_branch);
+        word test_pair = mkpair(vm, test, then_branch);
+        word if_form = mkpair(vm, if_sym, test_pair);
+
+        // Build bindings list: ((var init) ...)
+        word bind_list = word_nil(), *bprev = NULL;
+        word pcur = param_list;
+        word icur = init_list;
+        while (is_ptr(pcur) && is_ptr(icur) && obj_type(ptr_from_word(pcur)) == OBJ_TYPE_PAIR && obj_type(ptr_from_word(icur)) == OBJ_TYPE_PAIR) {
+            word single = mkpair(vm, pair_car(ptr_from_word(pcur)),
+                                 mkpair(vm, pair_car(ptr_from_word(icur)), word_nil()));
+            word wrapped = mkpair(vm, single, word_nil());
+            if (bprev) pair_cdr(bprev) = wrapped; else bind_list = wrapped;
+            bprev = ptr_from_word(wrapped);
+            pcur = pair_cdr(ptr_from_word(pcur));
+            icur = pair_cdr(ptr_from_word(icur));
+        }
+
+        // Build (let _do_loop ((var init) ...) (if test result body))
+        word let_sym = make_sym(vm, "let");
+        word loop_name = make_sym(vm, "_do_loop");
+        // (_do_loop ((var init) ...) body) — IS the cdr of the let form
+        word named_cdr = mkpair(vm, bind_list, mkpair(vm, if_form, word_nil()));
+        word let_cdr = mkpair(vm, loop_name, named_cdr);
+        word let_form_tagged = mkpair(vm, let_sym, let_cdr);
+
+        compile_list(buf, vm, let_form_tagged, scope, env);
         return;
     }
 

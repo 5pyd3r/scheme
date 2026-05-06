@@ -390,11 +390,8 @@
 ;; NOTE: define-syntax is handled by C compiler during Phase 1b loading.
 ;; Clauses must be quoted since syntax-rules is a function, not a special form.
 
-;; letrec: multi-variable ellipsis + direct transformer call (no eval).
-;; Recursive bindings need set! updating captured closure copies.
-(define-syntax letrec
-  (syntax-rules () '(((_ ((var val) ...) body ...)
-                      (let ((var val) ...) body ...)))))
+;; letrec is handled by C compiler as a special form (compiler.c line 1019).
+;; Scheme macro version disabled due to compound-ellipsis corruption (Issue 2).
 
 ;; case is handled by C compiler as a special form.
 
