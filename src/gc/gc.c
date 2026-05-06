@@ -27,10 +27,6 @@ static void gc_set_root_marker(void (*fn)(void*), void* state) {
     gc_root_marker_state = state;
 }
 
-static void* gc_state_ref(void) {
-    return NULL;
-}
-
 static obj_entry_t* entry_alloc(void) {
     if (free_entries) {
         obj_entry_t* e = free_entries;
@@ -174,8 +170,7 @@ gc_interface* gc_init(void) {
     gc.collect     = gc_collect;
     gc.mark_root   = gc_mark_root;
     gc.mark_stack  = gc_mark_stack;
-    gc.heap_used        = gc_heap_used;
-    gc.set_root_marker  = gc_set_root_marker;
-    gc.state_ref        = gc_state_ref;
+    gc.heap_used       = gc_heap_used;
+    gc.set_root_marker = gc_set_root_marker;
     return &gc;
 }

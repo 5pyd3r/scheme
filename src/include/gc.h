@@ -11,7 +11,6 @@ typedef struct {
     void  (*mark_stack)(word* stack, size_t count);
     size_t (*heap_used)(void);
     void  (*set_root_marker)(void (*fn)(void*), void* state);
-    void* (*state_ref)(void);
     void*  state;
 } gc_interface;
 
